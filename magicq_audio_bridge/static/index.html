@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>magicq-audio-matter-bridge</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #1a1e25;
+    --text: #e8eaed;
+    --dim: #8a919e;
+    --groove: #3fa7ff;
+    --breakdown: #a78bfa;
+    --buildup: #ffb020;
+    --drop: #ff4757;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  .wrap {
+    width: 100%; max-width: 780px;
+    display: flex; flex-direction: column; gap: 14px;
+    transition: max-width .2s;
+  }
+
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 4px; gap: 12px;
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: .04em; color: var(--dim); }
+  header .meta { font-size: 12px; color: var(--dim); text-align: right; line-height: 1.5; flex: 1; }
+  header .hdr-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+  header .stop, header .reboot, header .layout-btn {
+    background: transparent; color: var(--drop); border: 1px solid #5a2430;
+    border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 600;
+    cursor: pointer; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
+  }
+  header .reboot, header .layout-btn { color: var(--dim); border-color: #333842; }
+  header .stop:hover { background: #2a1218; }
+  header .reboot:hover, header .layout-btn:hover { background: #1a1e25; color: var(--text); }
+  header .stop:disabled, header .reboot:disabled, header .layout-btn:disabled { opacity: .5; cursor: default; }
+  .toggle {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--dim); user-select: none;
+  }
+  .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .toggle .knob {
+    width: 40px; height: 22px; border-radius: 999px; background: #333842;
+    position: relative; transition: background .2s; flex-shrink: 0;
+  }
+  .toggle .knob::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+    border-radius: 50%; background: #c5c9d1; transition: transform .2s;
+  }
+  .toggle input:checked + .knob { background: #276749; }
+  .toggle input:checked + .knob::after { transform: translateX(18px); background: #48bb78; }
+  .toggle.on { color: #48bb78; }
+  .toggle.off { color: var(--drop); }
+  .hero.output-off .section-label,
+  .hero.analyzer-off .section-label { color: var(--dim) !important; }
+  .hero.output-off .glow,
+  .hero.analyzer-off .glow { opacity: .06; }
+
+  .layout-bar {
+    background: var(--panel); border-radius: 16px; padding: 14px 18px;
+    display: none; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+    border: 1px solid #2a3140;
+  }
+  .layout-bar.open { display: flex; }
+  .layout-bar label {
+    font-size: 10px; color: var(--dim); letter-spacing: .1em;
+    text-transform: uppercase; display: flex; flex-direction: column; gap: 6px;
+  }
+  .layout-bar input[type="number"] {
+    background: var(--panel-2); border: 1px solid #262b33; color: var(--text);
+    border-radius: 8px; padding: 8px 10px; font-size: 14px; width: 72px;
+  }
+  .layout-bar .hint { font-size: 12px; color: var(--dim); flex: 1 1 180px; line-height: 1.4; }
+  .layout-bar button {
+    background: var(--groove); color: #08131e; font-weight: 600; border: none;
+    border-radius: 8px; padding: 10px 14px; font-size: 13px; cursor: pointer;
+  }
+  .layout-bar button.secondary {
+    background: var(--panel-2); color: var(--text); border: 1px solid #262b33;
+  }
+
+  .layout-grid {
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    align-items: stretch;
+  }
+  .layout-grid.editing {
+    min-height: 420px;
+    background-image:
+      linear-gradient(to right, #1f2430 1px, transparent 1px),
+      linear-gradient(to bottom, #1f2430 1px, transparent 1px);
+    background-size: calc(100% / var(--cols, 1)) 80px;
+    border: 1px dashed #333842;
+    border-radius: 16px;
+    padding: 10px;
+  }
+  .grid-cell {
+    min-height: 72px;
+    border: 1px dashed #2e3542;
+    border-radius: 12px;
+    background: rgba(255,255,255,.02);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #5a6270; letter-spacing: .08em; text-transform: uppercase;
+    cursor: pointer; user-select: none;
+  }
+  .grid-cell:hover, .grid-cell.drop-target { border-color: var(--groove); color: var(--groove); }
+  .box {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .box.editing-selected {
+    outline: 2px solid var(--groove);
+    outline-offset: 2px;
+  }
+  .panel.box, .hero.box { height: 100%; }
+  .panel.box { display: flex; flex-direction: column; }
+  .panel.box > *:not(.box-chrome) { min-height: 0; }
+  .panel.box .settings,
+  .panel.box .dmx,
+  .panel.box .log { flex: 1 1 auto; }
+  .box-chrome {
+    display: none;
+    position: absolute; top: 8px; right: 8px; z-index: 3;
+    gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end;
+  }
+  .editing .box-chrome { display: flex; }
+  .box-chrome select {
+    background: var(--panel-2); border: 1px solid #262b33; color: var(--text);
+    border-radius: 6px; padding: 4px 6px; font-size: 11px;
+  }
+  .box-chrome .drag {
+    background: var(--panel-2); border: 1px solid #262b33; color: var(--dim);
+    border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: grab;
+    letter-spacing: .06em; text-transform: uppercase;
+  }
+
+  .hero {
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 34px 28px 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero .glow {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 60% 120% at 30% 50%, var(--glow-color, transparent) 0%, transparent 70%);
+    opacity: .16;
+    transition: background .6s;
+    pointer-events: none;
+  }
+  .section-label {
+    font-size: 54px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    transition: color .3s;
+  }
+  .section-sub { font-size: 13px; color: var(--dim); margin-top: 6px; }
+  .bpm-box { text-align: right; }
+  .bpm-value { font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .bpm-label { font-size: 12px; color: var(--dim); letter-spacing: .1em; }
+  .beat-dot {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--text); margin-left: 10px; opacity: .1;
+  }
+
+  .panel { background: var(--panel); border-radius: 16px; padding: 20px 24px; }
+
+  .meter { display: grid; grid-template-columns: 74px 1fr 52px; gap: 14px; align-items: center; padding: 7px 0; }
+  .meter .name { font-size: 12px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
+  .meter .track { background: var(--panel-2); border-radius: 6px; height: 14px; overflow: hidden; }
+  .meter .fill {
+    height: 100%; border-radius: 6px; width: 0%;
+    transition: width 90ms linear;
+  }
+  .meter .val { font-size: 13px; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+  .fill.energy { background: linear-gradient(90deg, #2b6cb0, #3fa7ff); }
+  .fill.bass   { background: linear-gradient(90deg, #276749, #48bb78); }
+  .fill.build  { background: linear-gradient(90deg, #975a16, #ffb020); }
+  .fill.ramp   { background: linear-gradient(90deg, #9b2c2c, #ff4757); }
+  .fill.melody { background: linear-gradient(90deg, #6b46c1, #a78bfa); }
+  .fill.centroid { background: linear-gradient(90deg, #1a365d, #63b3ed); }
+  .fill.tilt { background: linear-gradient(90deg, #744210, #f6ad55); }
+
+  canvas { width: 100%; height: 90px; display: block; }
+
+  .dmx { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    background: var(--panel-2); border-radius: 8px; padding: 8px 0;
+    width: 76px; text-align: center;
+  }
+  .chip .ch { font-size: 10px; color: var(--dim); letter-spacing: .05em; }
+  .chip .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+  .log { font-size: 13px; color: var(--dim); line-height: 1.9; font-variant-numeric: tabular-nums; }
+  .log b { color: var(--text); font-weight: 600; }
+  .panel h2 {
+    font-size: 11px; font-weight: 600; color: var(--dim);
+    letter-spacing: .12em; text-transform: uppercase; margin-bottom: 12px;
+  }
+  .offline {
+    text-align: center; font-size: 13px; color: var(--drop);
+    padding: 6px; display: none;
+  }
+
+  .settings { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .settings label {
+    font-size: 10px; color: var(--dim); letter-spacing: .1em;
+    text-transform: uppercase; display: flex; flex-direction: column; gap: 6px;
+    flex: 1 1 160px;
+  }
+  .settings select, .settings input {
+    background: var(--panel-2); border: 1px solid #262b33; color: var(--text);
+    border-radius: 8px; padding: 9px 10px; font-size: 14px; font-family: inherit;
+    width: 100%;
+  }
+  .settings select { min-width: 200px; }
+  .settings input[type="text"] { min-width: 140px; }
+  .settings input[type="number"] { min-width: 80px; max-width: 110px; }
+  .settings select:focus, .settings input:focus { outline: 1px solid var(--groove); }
+  .settings .actions { display: flex; gap: 8px; align-items: flex-end; }
+  .settings button {
+    background: var(--groove); color: #08131e; font-weight: 600; border: none;
+    border-radius: 8px; padding: 10px 18px; font-size: 14px; cursor: pointer;
+    white-space: nowrap;
+  }
+  .settings button.secondary {
+    background: var(--panel-2); color: var(--text); border: 1px solid #262b33;
+  }
+  .settings button:disabled { opacity: .5; cursor: default; }
+  .settings-note { font-size: 12px; color: var(--dim); margin-top: 10px; min-height: 16px; }
+  .settings-note.err { color: var(--drop); }
+  .settings-note.ok { color: #48bb78; }
+  .settings-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid #262b33; }
+  .settings label.slider-label { flex: 1 1 220px; }
+  .settings input[type="range"] {
+    -webkit-appearance: none; appearance: none; height: 6px; padding: 0;
+    background: var(--panel-2); border: 1px solid #262b33; border-radius: 999px;
+    outline: none; min-width: 160px;
+  }
+  .settings input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--groove); cursor: pointer;
+  }
+  .settings .slider-val {
+    font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums;
+    letter-spacing: 0; text-transform: none; margin-top: 2px;
+  }
+  .seg-label {
+    flex: 1 1 100%; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--dim); margin: 4px 0 2px;
+  }
+  .matter-form, .matter-device { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+  .matter-device {
+    width: 100%; background: var(--panel-2); border: 1px solid #262b33;
+    border-radius: 10px; padding: 12px;
+  }
+  .matter-device h3 { font-size: 14px; font-weight: 600; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .matter-device .meta { font-size: 12px; color: var(--dim); margin-top: 6px; }
+  .matter-device img { width: 160px; height: 160px; background: #fff; border-radius: 8px; }
+  .badge { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; border: 1px solid #333842; border-radius: 999px; padding: 2px 8px; color: var(--dim); }
+  .badge.ok { color: #48bb78; border-color: #2a5a3c; }
+  .badge.warn { color: var(--buildup); border-color: #5a4420; }
+  .matter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <header>
+    <h1>MAGICQ AUDIO + MATTER BRIDGE</h1>
+    <div class="meta" id="meta">connecting&hellip;</div>
+    <div class="hdr-actions">
+      <label class="toggle on" id="lblAnalyze" title="Pause analysis; server and web UI stay up">
+        <input type="checkbox" id="chkAnalyze" checked>
+        <span class="knob"></span>
+        <span id="lblAnalyzeText">Analyzer on</span>
+      </label>
+      <label class="toggle on" id="lblEnable" title="Blackout Art-Net without stopping the server">
+        <input type="checkbox" id="chkEnable" checked>
+        <span class="knob"></span>
+        <span id="lblEnableText">Output on</span>
+      </label>
+      <button type="button" class="layout-btn" id="btnEditLayout" title="Rearrange dashboard panels">Edit layout</button>
+      <button type="button" class="reboot" id="btnReboot" title="Reboot this machine (Raspberry Pi)">Reboot</button>
+      <button type="button" class="stop" id="btnStop" title="Stop the server and free the port">Stop server</button>
+    </div>
+  </header>
+
+  <div class="layout-bar" id="layoutBar">
+    <label>Columns
+      <input type="number" id="inCols" min="1" max="4" step="1" value="1">
+    </label>
+    <label>Rows
+      <input type="number" id="inRows" min="1" max="8" step="1" value="6">
+    </label>
+    <div class="hint">Select a panel, then click a grid cell. Use W/H span so a tall left panel matches two stacked panels on the right (no dead space).</div>
+    <button type="button" class="secondary" id="btnLayoutReset">Reset</button>
+    <button type="button" class="secondary" id="btnLayoutCancel">Cancel</button>
+    <button type="button" id="btnLayoutSave">Save to Pi</button>
+  </div>
+
+  <div class="layout-grid" id="layoutGrid">
+    <div class="panel box" data-box="settings" id="box-settings">
+      <div class="box-chrome">
+        <select class="span-select" title="Width span (columns)"></select>
+        <select class="row-span-select" title="Height span (rows)"></select>
+        <span class="drag" draggable="true">Move</span>
+      </div>
+      <h2>Settings</h2>
+      <div class="settings">
+        <div class="seg-label">Shared network</div>
+        <label>Audio input
+          <select id="selDevice">
+            <option value="">Loading devices&hellip;</option>
+          </select>
+        </label>
+        <label>Network interface
+          <select id="selInterface">
+            <option value="">System default</option>
+          </select>
+        </label>
+        <label id="lblIp"><span id="lblIpText">Unicast IP</span>
+          <input type="text" id="inIp" placeholder="e.g. 192.168.1.100" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <div class="settings settings-row">
+        <div class="seg-label">Audio → MagicQ</div>
+        <label>Protocol
+          <select id="selProtocol">
+            <option value="artnet">Art-Net</option>
+            <option value="sacn">sACN (E1.31)</option>
+          </select>
+        </label>
+        <label>Destination
+          <select id="selMode">
+            <option value="unicast">Unicast</option>
+            <option value="broadcast">Broadcast</option>
+          </select>
+        </label>
+        <label>Port
+          <input type="number" id="inPort" min="1" max="65535" step="1" value="6454">
+        </label>
+        <label>Universe
+          <input type="number" id="inUni" min="0" max="63999" step="1" value="0">
+        </label>
+        <label id="lblPriority">sACN priority
+          <input type="number" id="inPriority" min="0" max="200" step="1" value="100">
+        </label>
+      </div>
+      <div class="settings settings-row">
+        <div class="seg-label">Matter → MagicQ</div>
+        <label>Protocol
+          <select id="selMatterProtocol">
+            <option value="artnet">Art-Net</option>
+            <option value="sacn">sACN (E1.31)</option>
+          </select>
+        </label>
+        <label>Destination
+          <select id="selMatterMode">
+            <option value="unicast">Unicast</option>
+            <option value="broadcast">Broadcast</option>
+          </select>
+        </label>
+        <label>Port
+          <input type="number" id="inMatterPort" min="1" max="65535" step="1" value="6454">
+        </label>
+        <label>Universe
+          <input type="number" id="inMatterUni" min="0" max="63999" step="1" value="1">
+        </label>
+        <label id="lblMatterPriority">sACN priority
+          <input type="number" id="inMatterPriority" min="0" max="200" step="1" value="100">
+        </label>
+        <label>Matter output
+          <select id="selMatterEnabled">
+            <option value="1">On</option>
+            <option value="0">Off</option>
+          </select>
+        </label>
+      </div>
+      <div class="settings settings-row">
+        <label class="slider-label">Build / drop intensity
+          <input type="range" id="rngIntensity" min="0" max="100" step="1" value="55">
+          <span class="slider-val" id="lblIntensity">55% — balanced</span>
+        </label>
+        <label class="slider-label">Drop length
+          <input type="range" id="rngDropHold" min="2" max="60" step="1" value="16">
+          <span class="slider-val" id="lblDropHold">16 s</span>
+        </label>
+        <label>Ch 14 rate from (quiet)
+          <select id="selBpmMin">
+            <option value="eighth">1/8 (32)</option>
+            <option value="quarter">1/4 (64)</option>
+            <option value="half">1/2 (128)</option>
+            <option value="full">1/1 (255)</option>
+          </select>
+        </label>
+        <label>Ch 14 rate to (loud)
+          <select id="selBpmMax">
+            <option value="eighth">1/8 (32)</option>
+            <option value="quarter">1/4 (64)</option>
+            <option value="half">1/2 (128)</option>
+            <option value="full" selected>1/1 (255)</option>
+          </select>
+        </label>
+        <label class="slider-label">Ch 14 decay (hold before step down)
+          <input type="range" id="rngBpmDecay" min="0" max="30" step="0.5" value="0">
+          <span class="slider-val" id="lblBpmDecay">0 s</span>
+        </label>
+        <div class="actions">
+          <button type="button" class="secondary" id="btnRefresh" title="Rescan audio devices">Refresh</button>
+          <button type="button" id="btnApply">Apply</button>
+        </div>
+      </div>
+      <div class="settings-note" id="settingsNote">Loading settings&hellip;</div>
+    </div>
+
+    <div class="hero box" data-box="hero" id="box-hero">
+      <div class="box-chrome">
+        <select class="span-select" title="Width span (columns)"></select>
+        <select class="row-span-select" title="Height span (rows)"></select>
+        <span class="drag" draggable="true">Move</span>
+      </div>
+      <div class="glow" id="glow"></div>
+      <div>
+        <div class="section-label" id="section">&mdash;</div>
+        <div class="section-sub" id="sectionSub"></div>
+      </div>
+      <div class="bpm-box">
+        <div class="bpm-value"><span id="bpm">&mdash;</span><span class="beat-dot" id="beatDot"></span></div>
+        <div class="bpm-label">BPM</div>
+      </div>
+    </div>
+
+    <div class="panel box" data-box="meters" id="box-meters">
+      <div class="box-chrome">
+        <select class="span-select" title="Width span (columns)"></select>
+        <select class="row-span-select" title="Height span (rows)"></select>
+        <span class="drag" draggable="true">Move</span>
+      </div>
+      <div class="meter"><div class="name">Energy</div><div class="track"><div class="fill energy" id="mEnergy"></div></div><div class="val" id="vEnergy">&ndash;</div></div>
+      <div class="meter"><div class="name">Kick</div><div class="track"><div class="fill bass" id="mBass"></div></div><div class="val" id="vBass">&ndash;</div></div>
+      <div class="meter"><div class="name">Build</div><div class="track"><div class="fill build" id="mBuild"></div></div><div class="val" id="vBuild">&ndash;</div></div>
+      <div class="meter"><div class="name">Melody</div><div class="track"><div class="fill melody" id="mMelody"></div></div><div class="val" id="vMelody">&ndash;</div></div>
+      <div class="meter"><div class="name">Centroid</div><div class="track"><div class="fill centroid" id="mCentroid"></div></div><div class="val" id="vCentroid">&ndash;</div></div>
+      <div class="meter"><div class="name">Tilt</div><div class="track"><div class="fill tilt" id="mTilt"></div></div><div class="val" id="vTilt">&ndash;</div></div>
+      <div class="meter"><div class="name">BPM rate</div><div class="track"><div class="fill ramp" id="mBpmRate"></div></div><div class="val" id="vBpmRate">&ndash;</div></div>
+      <div class="meter"><div class="name">Ramp</div><div class="track"><div class="fill ramp" id="mRamp"></div></div><div class="val" id="vRamp">&ndash;</div></div>
+    </div>
+
+    <div class="panel box" data-box="spark" id="box-spark">
+      <div class="box-chrome">
+        <select class="span-select" title="Width span (columns)"></select>
+        <select class="row-span-select" title="Height span (rows)"></select>
+        <span class="drag" draggable="true">Move</span>
+      </div>
+      <h2>Energy &mdash; last 60 s</h2>
+      <canvas id="spark" width="1400" height="180"></canvas>
+    </div>
+
+    <div class="panel box" data-box="dmx" id="box-dmx">
+      <div class="box-chrome">
+        <select class="span-select" title="Width span (columns)"></select>
+        <select class="row-span-select" title="Height span (rows)"></select>
+        <span class="drag" draggable="true">Move</span>
+      </div>
+      <h2>DMX output</h2>
+      <div class="dmx" id="dmx"></div>
+    </div>
+
+    <div class="panel box" data-box="log" id="box-log">
+      <div class="box-chrome">
+        <select class="span-select" title="Width span (columns)"></select>
+        <select class="row-span-select" title="Height span (rows)"></select>
+        <span class="drag" draggable="true">Move</span>
+      </div>
+      <h2>Section log</h2>
+      <div class="log" id="log">&mdash;</div>
+    </div>
+
+    <div class="panel box" data-box="matter" id="box-matter">
+      <div class="box-chrome">
+        <select class="span-select" title="Width span (columns)"></select>
+        <select class="row-span-select" title="Height span (rows)"></select>
+        <span class="drag" draggable="true">Move</span>
+      </div>
+      <h2>Matter devices</h2>
+      <form class="settings matter-form" id="matterCreate">
+        <label>Type
+          <select id="matterType">
+            <option value="onoff">On / Off</option>
+            <option value="rgb">On / Off + RGB</option>
+          </select>
+        </label>
+        <label style="flex:2">Name
+          <input id="matterName" maxlength="64" placeholder="House lights" required>
+        </label>
+        <label id="lblMatterCh">DMX channel
+          <input id="matterChannel" type="number" min="1" max="512" value="1">
+        </label>
+        <span id="rgbMatterChannels" hidden>
+          <label>Intensity ch <input id="matterI" type="number" min="1" max="512" value="1"></label>
+          <label>Red ch <input id="matterR" type="number" min="1" max="512" value="2"></label>
+          <label>Green ch <input id="matterG" type="number" min="1" max="512" value="3"></label>
+          <label>Blue ch <input id="matterB" type="number" min="1" max="512" value="4"></label>
+        </span>
+        <div class="actions">
+          <button type="submit">Create Matter node</button>
+        </div>
+      </form>
+      <div class="settings-note" id="matterNote"></div>
+      <div id="matterList" class="settings" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div class="offline" id="offline">source stopped or connection lost &mdash; retrying&hellip;</div>
+</div>
+
+<script>
+const COLORS = { groove: "#3fa7ff", breakdown: "#a78bfa", buildup: "#ffb020", drop: "#ff4757", off: "#8a919e" };
+const CH_NAMES = ["groove","breakdown","buildup","drop","ramp","beat","energy","kick","drop_hit","melody","4/4","centroid","tilt","bpm_rate"];
+const BPM_RATE_LABELS = {32: "1/8", 64: "1/4", 128: "1/2", 255: "1/1"};
+const BOX_IDS = ["settings", "hero", "meters", "spark", "dmx", "log", "matter"];
+const DEFAULT_LAYOUT = {
+  cols: 1,
+  rows: 7,
+  items: BOX_IDS.map((id, i) => ({ id, row: i + 1, col: 1, colSpan: 1, rowSpan: 1 })),
+};
+
+const $ = id => document.getElementById(id);
+let lastSection = null;
+let logEntries = [];
+let history = [];
+let settingsInit = false;
+let simulateMode = false;
+let currentDeviceHint = "";
+let outputEnabled = true;
+let analyzerOn = true;
+let layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+let layoutDraft = null;
+let editingLayout = false;
+let selectedBox = null;
+let dragBoxId = null;
+
+for (let i = 0; i < CH_NAMES.length; i++) {
+  const chip = document.createElement("div");
+  chip.className = "chip";
+  chip.innerHTML = `<div class="ch">${i+1} &middot; ${CH_NAMES[i]}</div><div class="v" id="dmx${i}">0</div>`;
+  $("dmx").appendChild(chip);
+}
+
+function fmtTime(t) {
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+function setEnableUI(on) {
+  outputEnabled = !!on;
+  $("chkEnable").checked = outputEnabled;
+  $("lblEnableText").textContent = outputEnabled ? "Output on" : "Output off";
+  $("lblEnable").className = "toggle " + (outputEnabled ? "on" : "off");
+  $("box-hero").classList.toggle("output-off", !outputEnabled);
+}
+
+function setAnalyzeUI(on) {
+  analyzerOn = !!on;
+  $("chkAnalyze").checked = analyzerOn;
+  $("lblAnalyzeText").textContent = analyzerOn ? "Analyzer on" : "Analyzer off";
+  $("lblAnalyze").className = "toggle " + (analyzerOn ? "on" : "off");
+  $("box-hero").classList.toggle("analyzer-off", !analyzerOn);
+}
+
+function update(s) {
+  if (s.section === undefined) return;
+  if (s.enabled !== undefined) setEnableUI(s.enabled);
+  if (s.analyzing !== undefined) setAnalyzeUI(s.analyzing);
+  const color = COLORS[s.section] || "#e8eaed";
+
+  if (!analyzerOn) {
+    $("section").textContent = "PAUSED";
+    $("section").style.color = COLORS.off;
+    $("glow").style.setProperty("--glow-color", COLORS.off);
+    $("sectionSub").textContent = "Analyzer off — server/UI still running";
+  } else if (!outputEnabled) {
+    $("section").textContent = "OFF";
+    $("section").style.color = COLORS.off;
+    $("glow").style.setProperty("--glow-color", COLORS.off);
+    $("sectionSub").textContent = "Art-Net blackout — analysis still running";
+  } else {
+    $("section").textContent = s.section.toUpperCase();
+    $("section").style.color = color;
+    $("glow").style.setProperty("--glow-color", color);
+    $("sectionSub").textContent = `for ${Math.floor(s.t_in_state)} s`;
+  }
+  $("bpm").textContent = s.bpm > 0 ? s.bpm.toFixed(1) : "—";
+  $("beatDot").style.opacity = Math.max(0.08, 1 - s.beat_age * 5);
+
+  const pct = (v, max) => Math.min(100, Math.max(0, v / max * 100)) + "%";
+  $("mEnergy").style.width = pct(s.energy, 2);  $("vEnergy").textContent = s.energy.toFixed(2);
+  $("mBass").style.width   = pct(s.bass, 2);    $("vBass").textContent   = s.bass.toFixed(2);
+  $("mBuild").style.width  = pct(s.build, 1);   $("vBuild").textContent  = s.build.toFixed(2);
+  $("mMelody").style.width = pct(s.melody ?? 0, 1); $("vMelody").textContent = (s.melody ?? 0).toFixed(2);
+  $("mCentroid").style.width = pct(s.centroid ?? 0, 1); $("vCentroid").textContent = (s.centroid ?? 0).toFixed(2);
+  $("mTilt").style.width = pct(s.tilt ?? 0, 1); $("vTilt").textContent = (s.tilt ?? 0).toFixed(2);
+  const br = s.bpm_rate ?? 32;
+  $("mBpmRate").style.width = pct(br, 255);
+  const nearest = [32, 64, 128, 255].reduce((a, b) => Math.abs(b - br) < Math.abs(a - br) ? b : a);
+  $("vBpmRate").textContent = `${Math.round(br)} (${BPM_RATE_LABELS[nearest] || "?"})`;
+  $("mRamp").style.width   = pct(s.ramp, 1);    $("vRamp").textContent   = Math.round(s.ramp * 255);
+
+  for (let i = 0; i < CH_NAMES.length; i++) $("dmx" + i).textContent = s.dmx[i] ?? 0;
+
+  if (s.meta) $("meta").innerHTML = `${s.meta.source}<br>${s.meta.artnet}<br>${s.meta.matter || ""}`;
+
+  if (lastSection !== null && s.section !== lastSection) {
+    logEntries.unshift(`${fmtTime(s.t)} &nbsp; ${lastSection.toUpperCase()} <b>&rarr; ${s.section.toUpperCase()}</b>`);
+    logEntries = logEntries.slice(0, 8);
+    $("log").innerHTML = logEntries.join("<br>");
+  }
+  lastSection = s.section;
+
+  history.push([s.t, s.energy, s.section]);
+  while (history.length && history[0][0] < s.t - 60) history.shift();
+  drawSpark(s.t);
+}
+
+function drawSpark(now) {
+  const c = $("spark"), ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (history.length < 2) return;
+  const x = t => (t - (now - 60)) / 60 * c.width;
+  const y = e => c.height - Math.min(1, e / 2) * (c.height - 8) - 4;
+  ctx.lineWidth = 2.5;
+  for (let i = 1; i < history.length; i++) {
+    ctx.strokeStyle = COLORS[history[i][2]] || "#3fa7ff";
+    ctx.beginPath();
+    ctx.moveTo(x(history[i-1][0]), y(history[i-1][1]));
+    ctx.lineTo(x(history[i][0]), y(history[i][1]));
+    ctx.stroke();
+  }
+}
+
+function selectMatchingDevice(sel, current) {
+  if (!current) {
+    sel.value = "";
+    return;
+  }
+  const lower = current.toLowerCase();
+  for (const opt of sel.options) {
+    if (opt.value && opt.value.toLowerCase().includes(lower)) {
+      sel.value = opt.value;
+      return;
+    }
+  }
+  const opt = document.createElement("option");
+  opt.value = current;
+  opt.textContent = current + " (from config)";
+  sel.appendChild(opt);
+  sel.value = current;
+}
+
+function fillDeviceSelect(devices, preferred) {
+  const sel = $("selDevice");
+  sel.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "";
+  def.textContent = "System default";
+  sel.appendChild(def);
+  for (const name of devices) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+  if (!devices.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(no devices found)";
+    sel.appendChild(opt);
+  }
+  selectMatchingDevice(sel, preferred || "");
+}
+
+function fmtDecay(v) {
+  const n = Number(v);
+  if (n <= 0) return "0 s (instant)";
+  return (Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1)) + " s";
+}
+
+function syncDecayLabel() {
+  $("lblBpmDecay").textContent = fmtDecay($("rngBpmDecay").value);
+}
+
+function fmtIntensity(v) {
+  const n = Number(v);
+  let tip = "balanced";
+  if (n <= 30) tip = "groove / monotonous";
+  else if (n >= 75) tip = "aggressive builds";
+  return n + "% — " + tip;
+}
+
+function syncIntensityLabel() {
+  $("lblIntensity").textContent = fmtIntensity($("rngIntensity").value);
+}
+
+function syncDropHoldLabel() {
+  $("lblDropHold").textContent = Number($("rngDropHold").value) + " s";
+}
+
+function cloneLayout(src) {
+  return JSON.parse(JSON.stringify(src));
+}
+
+function currentLayout() {
+  return editingLayout && layoutDraft ? layoutDraft : layout;
+}
+
+function boxEl(id) {
+  return document.querySelector(`[data-box="${id}"]`);
+}
+
+function itemFor(id, lay) {
+  return (lay.items || []).find(it => it.id === id);
+}
+
+function applyLayout(lay) {
+  const grid = $("layoutGrid");
+  const cols = Math.max(1, Math.min(4, Number(lay.cols) || 1));
+  const rows = Math.max(1, Math.min(8, Number(lay.rows) || 6));
+  grid.style.setProperty("--cols", cols);
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  // Equal row tracks so a tall panel (rowSpan>1) matches stacked neighbors.
+  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  if (!editingLayout) {
+    grid.style.minHeight = rows > 1 || cols > 1 ? "72vh" : "";
+  }
+  $("wrap").style.maxWidth = cols > 1 ? "1200px" : "780px";
+
+  for (const id of BOX_IDS) {
+    const el = boxEl(id);
+    const it = itemFor(id, lay) || { row: 1, col: 1, colSpan: 1, rowSpan: 1 };
+    const col = Math.max(1, Math.min(cols, it.col || 1));
+    const row = Math.max(1, Math.min(rows, it.row || 1));
+    const colSpan = Math.max(1, Math.min(cols - col + 1, it.colSpan || 1));
+    const rowSpan = Math.max(1, Math.min(rows - row + 1, it.rowSpan || 1));
+    el.style.gridColumn = `${col} / span ${colSpan}`;
+    el.style.gridRow = `${row} / span ${rowSpan}`;
+    el.style.zIndex = "2";
+    const sel = el.querySelector(".span-select");
+    if (sel) {
+      sel.innerHTML = "";
+      for (let s = 1; s <= cols; s++) {
+        const opt = document.createElement("option");
+        opt.value = String(s);
+        opt.textContent = "W×" + s;
+        if (s === colSpan) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+    const rsel = el.querySelector(".row-span-select");
+    if (rsel) {
+      rsel.innerHTML = "";
+      for (let s = 1; s <= rows; s++) {
+        const opt = document.createElement("option");
+        opt.value = String(s);
+        opt.textContent = "H×" + s;
+        if (s === rowSpan) opt.selected = true;
+        rsel.appendChild(opt);
+      }
+    }
+  }
+  renderEditCells(lay);
+}
+
+function clearEditCells() {
+  $("layoutGrid").querySelectorAll(".grid-cell").forEach(n => n.remove());
+}
+
+function renderEditCells(lay) {
+  clearEditCells();
+  if (!editingLayout) return;
+  const cols = lay.cols, rows = lay.rows;
+  for (let r = 1; r <= rows; r++) {
+    for (let c = 1; c <= cols; c++) {
+      const cell = document.createElement("div");
+      cell.className = "grid-cell";
+      cell.style.gridColumn = String(c);
+      cell.style.gridRow = String(r);
+      cell.style.zIndex = "1";
+      cell.dataset.row = String(r);
+      cell.dataset.col = String(c);
+      cell.textContent = r + "," + c;
+      cell.onclick = () => placeSelectedAt(r, c);
+      cell.ondragover = ev => { ev.preventDefault(); cell.classList.add("drop-target"); };
+      cell.ondragleave = () => cell.classList.remove("drop-target");
+      cell.ondrop = ev => {
+        ev.preventDefault();
+        cell.classList.remove("drop-target");
+        const id = ev.dataTransfer.getData("text/box-id") || dragBoxId;
+        if (id) placeBoxAt(id, r, c);
+      };
+      $("layoutGrid").appendChild(cell);
+    }
+  }
+}
+
+function placeBoxAt(id, row, col) {
+  if (!layoutDraft) return;
+  const it = itemFor(id, layoutDraft);
+  if (!it) return;
+  it.row = row;
+  it.col = col;
+  it.colSpan = Math.min(it.colSpan || 1, layoutDraft.cols - col + 1);
+  selectedBox = id;
+  document.querySelectorAll(".box").forEach(el => {
+    el.classList.toggle("editing-selected", el.dataset.box === id);
+  });
+  applyLayout(layoutDraft);
+}
+
+function placeSelectedAt(row, col) {
+  if (!selectedBox) {
+    $("settingsNote").className = "settings-note";
+    $("settingsNote").textContent = "Select a panel first (click it), then a grid cell.";
+    return;
+  }
+  placeBoxAt(selectedBox, row, col);
+}
+
+function setEditing(on) {
+  editingLayout = on;
+  $("layoutBar").classList.toggle("open", on);
+  $("layoutGrid").classList.toggle("editing", on);
+  $("btnEditLayout").textContent = on ? "Editing…" : "Edit layout";
+  if (on) {
+    layoutDraft = cloneLayout(layout);
+    $("inCols").value = String(layoutDraft.cols);
+    $("inRows").value = String(layoutDraft.rows);
+    selectedBox = null;
+    applyLayout(layoutDraft);
+  } else {
+    layoutDraft = null;
+    selectedBox = null;
+    document.querySelectorAll(".box").forEach(el => el.classList.remove("editing-selected"));
+    clearEditCells();
+    applyLayout(layout);
+  }
+}
+
+function wireBoxChrome() {
+  for (const id of BOX_IDS) {
+    const el = boxEl(id);
+    el.addEventListener("click", ev => {
+      if (!editingLayout) return;
+      if (ev.target.closest(".box-chrome")) return;
+      selectedBox = id;
+      document.querySelectorAll(".box").forEach(b => {
+        b.classList.toggle("editing-selected", b.dataset.box === id);
+      });
+    });
+    const drag = el.querySelector(".drag");
+    drag.addEventListener("dragstart", ev => {
+      if (!editingLayout) { ev.preventDefault(); return; }
+      dragBoxId = id;
+      selectedBox = id;
+      ev.dataTransfer.setData("text/box-id", id);
+      ev.dataTransfer.effectAllowed = "move";
+    });
+    drag.addEventListener("dragend", () => { dragBoxId = null; });
+    const span = el.querySelector(".span-select");
+    span.addEventListener("change", () => {
+      if (!layoutDraft) return;
+      const it = itemFor(id, layoutDraft);
+      if (!it) return;
+      it.colSpan = Number(span.value) || 1;
+      it.colSpan = Math.min(it.colSpan, layoutDraft.cols - it.col + 1);
+      applyLayout(layoutDraft);
+    });
+    const rspan = el.querySelector(".row-span-select");
+    rspan.addEventListener("change", () => {
+      if (!layoutDraft) return;
+      const it = itemFor(id, layoutDraft);
+      if (!it) return;
+      it.rowSpan = Number(rspan.value) || 1;
+      it.rowSpan = Math.min(it.rowSpan, layoutDraft.rows - it.row + 1);
+      applyLayout(layoutDraft);
+    });
+  }
+}
+
+function fillInterfaceSelect(ifaces, preferred) {
+  const sel = $("selInterface");
+  const current = preferred !== undefined ? preferred : sel.value;
+  sel.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "";
+  def.textContent = "System default";
+  sel.appendChild(def);
+  for (const nic of ifaces || []) {
+    const opt = document.createElement("option");
+    opt.value = nic.name;
+    const kind = nic.kind === "wifi" ? "Wi-Fi" : (nic.kind === "ethernet" ? "Ethernet" : nic.kind || "NIC");
+    const connected = nic.connected === "1" || nic.connected === true;
+    const origin = nic.origin === "dhcp" ? "DHCP" : (nic.origin === "static" ? "static" : "");
+    let detail;
+    if (nic.ip && connected) detail = nic.ip + (origin ? ", " + origin : "");
+    else if (nic.ip && !connected) detail = nic.ip + (origin ? ", " + origin : "") + ", no link";
+    else if (connected) detail = "no IPv4";
+    else detail = "disconnected";
+    opt.textContent = nic.name + " — " + kind + " (" + detail + ")";
+    sel.appendChild(opt);
+  }
+  if (current) {
+    const match = [...sel.options].some(o => o.value === current);
+    if (!match) {
+      const opt = document.createElement("option");
+      opt.value = current;
+      opt.textContent = current + " (from config)";
+      sel.appendChild(opt);
+    }
+    sel.value = current;
+  }
+}
+
+function fillModeOptions(sel, protocol, preferred) {
+  if (typeof sel === "string") sel = $(sel);
+  const modes = protocol === "sacn"
+    ? [["unicast", "Unicast"], ["multicast", "Multicast"]]
+    : [["unicast", "Unicast"], ["broadcast", "Broadcast"]];
+  const want = modes.some(m => m[0] === preferred) ? preferred : modes[0][0];
+  sel.innerHTML = "";
+  for (const [value, label] of modes) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  sel.value = want;
+}
+
+function syncOutputLabels() {
+  const proto = $("selProtocol").value;
+  const matterProto = $("selMatterProtocol").value;
+  const unicast = $("selMode").value === "unicast" || $("selMatterMode").value === "unicast";
+  $("lblIp").style.display = unicast ? "" : "none";
+  $("inIp").disabled = !unicast;
+  $("lblIpText").textContent = "Unicast IP (shared)";
+  $("inIp").placeholder = "e.g. 192.168.1.100";
+  $("lblPriority").style.opacity = proto === "sacn" ? "1" : "0.45";
+  $("inPriority").disabled = proto !== "sacn";
+  $("lblMatterPriority").style.opacity = matterProto === "sacn" ? "1" : "0.45";
+  $("inMatterPriority").disabled = matterProto !== "sacn";
+}
+
+function maybeDefaultPort() {
+  const proto = $("selProtocol").value;
+  const port = Number($("inPort").value);
+  if (proto === "sacn" && (port === 6454 || !port)) $("inPort").value = "5568";
+  if (proto === "artnet" && (port === 5568 || !port)) $("inPort").value = "6454";
+}
+
+function maybeDefaultMatterPort() {
+  const proto = $("selMatterProtocol").value;
+  const port = Number($("inMatterPort").value);
+  if (proto === "sacn" && (port === 6454 || !port)) $("inMatterPort").value = "5568";
+  if (proto === "artnet" && (port === 5568 || !port)) $("inMatterPort").value = "6454";
+}
+
+function applyMetaToForm(meta, devices, interfaces) {
+  simulateMode = !!meta.simulate;
+  currentDeviceHint = meta.device || "";
+  if (meta.protocol) $("selProtocol").value = meta.protocol;
+  fillModeOptions("selMode", $("selProtocol").value, meta.mode);
+  fillModeOptions("selMatterMode", meta.matter_protocol || "artnet", meta.matter_mode);
+  if (meta.matter_protocol) $("selMatterProtocol").value = meta.matter_protocol;
+  fillInterfaceSelect(interfaces || [], meta.interface || "");
+  $("inIp").value = meta.ip || "";
+  $("inPort").value = meta.port ?? (meta.protocol === "sacn" ? 5568 : 6454);
+  $("inUni").value = meta.universe ?? 0;
+  $("inPriority").value = meta.priority ?? 100;
+  $("inMatterPort").value = meta.matter_port ?? (meta.matter_protocol === "sacn" ? 5568 : 6454);
+  $("inMatterUni").value = meta.matter_universe ?? 1;
+  $("inMatterPriority").value = meta.matter_priority ?? 100;
+  $("selMatterEnabled").value = meta.matter_enabled === false ? "0" : "1";
+  syncOutputLabels();
+  if (meta.bpm_rate_min) $("selBpmMin").value = meta.bpm_rate_min;
+  if (meta.bpm_rate_max) $("selBpmMax").value = meta.bpm_rate_max;
+  if (meta.bpm_rate_decay !== undefined && meta.bpm_rate_decay !== null) {
+    $("rngBpmDecay").value = String(meta.bpm_rate_decay);
+    syncDecayLabel();
+  }
+  if (meta.intensity !== undefined && meta.intensity !== null) {
+    $("rngIntensity").value = String(Math.round(Number(meta.intensity) * 100));
+    syncIntensityLabel();
+  }
+  if (meta.drop_hold_seconds !== undefined && meta.drop_hold_seconds !== null) {
+    $("rngDropHold").value = String(Math.round(Number(meta.drop_hold_seconds)));
+    syncDropHoldLabel();
+  }
+  if (meta.enabled !== undefined) setEnableUI(meta.enabled);
+  if (meta.analyzing !== undefined) setAnalyzeUI(meta.analyzing);
+  $("meta").innerHTML = `${meta.source || ""}<br>${meta.artnet || ""}<br>${meta.matter || ""}`;
+
+  if (simulateMode) {
+    $("selDevice").innerHTML = "<option value=''>(simulation mode)</option>";
+    $("selDevice").disabled = true;
+    $("btnRefresh").disabled = true;
+  } else {
+    $("selDevice").disabled = false;
+    $("btnRefresh").disabled = false;
+    fillDeviceSelect(devices || [], meta.device);
+  }
+
+  if (meta.dry_run) {
+    $("settingsNote").className = "settings-note";
+    $("settingsNote").textContent = "dry run: Art-Net output is disabled by --dry-run";
+  } else if (!settingsInit) {
+    $("settingsNote").textContent = "";
+  }
+  settingsInit = true;
+}
+
+async function bootstrapSettings() {
+  try {
+    const r = await fetch("/api/config", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    applyMetaToForm(d.meta, d.devices, d.interfaces);
+    if (d.layout) {
+      layout = d.layout;
+      if (!editingLayout) applyLayout(layout);
+    }
+    if (!d.meta.dry_run) $("settingsNote").textContent = "";
+  } catch (e) {
+    $("settingsNote").className = "settings-note err";
+    $("settingsNote").textContent = "could not load settings: " + e;
+  }
+}
+
+async function loadDevices(current) {
+  if (simulateMode) return;
+  try {
+    const r = await fetch("/devices", { cache: "no-store" });
+    const d = await r.json();
+    fillDeviceSelect(d.devices, current !== undefined ? current : (d.current || currentDeviceHint));
+  } catch (e) {
+    $("settingsNote").className = "settings-note err";
+    $("settingsNote").textContent = "could not load device list";
+  }
+}
+
+$("btnRefresh").onclick = () => {
+  if (!simulateMode) loadDevices(currentDeviceHint);
+};
+
+$("rngBpmDecay").oninput = syncDecayLabel;
+$("rngIntensity").oninput = syncIntensityLabel;
+$("rngDropHold").oninput = syncDropHoldLabel;
+syncDecayLabel();
+syncIntensityLabel();
+syncDropHoldLabel();
+wireBoxChrome();
+applyLayout(layout);
+
+$("btnEditLayout").onclick = () => setEditing(!editingLayout);
+
+$("inCols").onchange = () => {
+  if (!layoutDraft) return;
+  layoutDraft.cols = Math.max(1, Math.min(4, Number($("inCols").value) || 1));
+  $("inCols").value = String(layoutDraft.cols);
+  for (const it of layoutDraft.items) {
+    it.col = Math.min(it.col, layoutDraft.cols);
+    it.colSpan = Math.min(it.colSpan, layoutDraft.cols - it.col + 1);
+  }
+  applyLayout(layoutDraft);
+};
+$("inRows").onchange = () => {
+  if (!layoutDraft) return;
+  layoutDraft.rows = Math.max(1, Math.min(8, Number($("inRows").value) || 1));
+  $("inRows").value = String(layoutDraft.rows);
+  for (const it of layoutDraft.items) {
+    it.row = Math.min(it.row, layoutDraft.rows);
+    it.rowSpan = Math.min(it.rowSpan || 1, layoutDraft.rows - it.row + 1);
+  }
+  applyLayout(layoutDraft);
+};
+
+$("btnLayoutReset").onclick = () => {
+  layoutDraft = cloneLayout(DEFAULT_LAYOUT);
+  $("inCols").value = "1";
+  $("inRows").value = "6";
+  applyLayout(layoutDraft);
+};
+
+$("btnLayoutCancel").onclick = () => setEditing(false);
+
+$("btnLayoutSave").onclick = async () => {
+  if (!layoutDraft) return;
+  layoutDraft.cols = Math.max(1, Math.min(4, Number($("inCols").value) || 1));
+  layoutDraft.rows = Math.max(1, Math.min(8, Number($("inRows").value) || 1));
+  try {
+    const r = await fetch("/api/layout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout: layoutDraft }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "save failed");
+    layout = d.layout;
+    setEditing(false);
+    $("settingsNote").className = "settings-note ok";
+    $("settingsNote").textContent = "Layout saved on the Pi";
+  } catch (e) {
+    $("settingsNote").className = "settings-note err";
+    $("settingsNote").textContent = "could not save layout: " + e;
+  }
+};
+
+async function postEnableBody(body, revert) {
+  try {
+    const r = await fetch("/enable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      revert();
+      $("settingsNote").className = "settings-note err";
+      $("settingsNote").textContent = d.error || "failed to toggle";
+    } else {
+      $("settingsNote").className = "settings-note ok";
+      $("settingsNote").textContent = d.message;
+    }
+  } catch (e) {
+    revert();
+    $("settingsNote").className = "settings-note err";
+    $("settingsNote").textContent = "failed to toggle: " + e;
+  }
+}
+
+$("chkEnable").onchange = async () => {
+  const on = $("chkEnable").checked;
+  setEnableUI(on);
+  await postEnableBody({ enabled: on }, () => setEnableUI(!on));
+};
+
+$("chkAnalyze").onchange = async () => {
+  const on = $("chkAnalyze").checked;
+  setAnalyzeUI(on);
+  await postEnableBody({ analyzing: on }, () => setAnalyzeUI(!on));
+};
+
+$("selProtocol").onchange = () => {
+  fillModeOptions("selMode", $("selProtocol").value, $("selMode").value);
+  maybeDefaultPort();
+  syncOutputLabels();
+};
+$("selMatterProtocol").onchange = () => {
+  fillModeOptions("selMatterMode", $("selMatterProtocol").value, $("selMatterMode").value);
+  maybeDefaultMatterPort();
+  syncOutputLabels();
+};
+$("selMode").onchange = syncOutputLabels;
+$("selMatterMode").onchange = syncOutputLabels;
+syncOutputLabels();
+
+$("btnApply").onclick = async () => {
+  const btn = $("btnApply"), note = $("settingsNote");
+  btn.disabled = true;
+  note.className = "settings-note";
+  note.textContent = "applying\u2026";
+  try {
+    const body = {
+      protocol: $("selProtocol").value,
+      mode: $("selMode").value,
+      interface: $("selInterface").value,
+      port: Number($("inPort").value),
+      universe: Number($("inUni").value),
+      priority: Number($("inPriority").value),
+      matter_protocol: $("selMatterProtocol").value,
+      matter_mode: $("selMatterMode").value,
+      matter_port: Number($("inMatterPort").value),
+      matter_universe: Number($("inMatterUni").value),
+      matter_priority: Number($("inMatterPriority").value),
+      matter_enabled: $("selMatterEnabled").value === "1",
+      bpm_rate_min: $("selBpmMin").value,
+      bpm_rate_max: $("selBpmMax").value,
+      bpm_rate_decay: Number($("rngBpmDecay").value),
+      intensity: Number($("rngIntensity").value) / 100,
+      drop_hold_seconds: Number($("rngDropHold").value),
+    };
+    if ($("selMode").value === "unicast" || $("selMatterMode").value === "unicast") {
+      body.ip = $("inIp").value.trim();
+    }
+    if (!$("selDevice").disabled) body.device = $("selDevice").value;
+    const r = await fetch("/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      note.className = "settings-note ok";
+      note.textContent = d.message;
+      fillModeOptions("selMode", body.protocol, body.mode);
+      fillModeOptions("selMatterMode", body.matter_protocol, body.matter_mode);
+      $("selInterface").value = body.interface;
+      if (body.ip !== undefined) $("inIp").value = body.ip;
+      syncDecayLabel();
+      syncIntensityLabel();
+      syncDropHoldLabel();
+      syncOutputLabels();
+      if (!$("selDevice").disabled) currentDeviceHint = body.device;
+    } else {
+      note.className = "settings-note err";
+      note.textContent = d.error || "failed to apply";
+    }
+  } catch (e) {
+    note.className = "settings-note err";
+    note.textContent = "failed to apply: " + e;
+  }
+  btn.disabled = false;
+};
+
+$("btnReboot").onclick = async () => {
+  if (!confirm("Reboot this machine now?")) return;
+  const btn = $("btnReboot");
+  btn.disabled = true;
+  btn.textContent = "Rebooting\u2026";
+  try {
+    await fetch("/reboot", { method: "POST" });
+    $("offline").style.display = "block";
+    $("offline").textContent = "Rebooting\u2026 page will reconnect when the Pi is back.";
+  } catch (e) {
+    $("offline").style.display = "block";
+    $("offline").textContent = "Reboot requested. Waiting for the machine\u2026";
+  }
+};
+
+$("btnStop").onclick = async () => {
+  if (!confirm("Stop the bridge server and free the port?")) return;
+  const btn = $("btnStop");
+  btn.disabled = true;
+  btn.textContent = "Stopping\u2026";
+  try {
+    await fetch("/shutdown", { method: "POST" });
+    $("offline").style.display = "block";
+    $("offline").textContent = "Server stopped. You can close this tab.";
+    $("settingsNote").className = "settings-note";
+    $("settingsNote").textContent = "Server stopped.";
+  } catch (e) {
+    $("offline").style.display = "block";
+    $("offline").textContent = "Server stopped. You can close this tab.";
+  }
+};
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = ev => {
+    const s = JSON.parse(ev.data);
+    $("offline").style.display = s.running ? "none" : "block";
+    if (s.meta) {
+      if (!settingsInit) applyMetaToForm(s.meta, null);
+      else $("meta").innerHTML = `${s.meta.source}<br>${s.meta.artnet}<br>${s.meta.matter || ""}`;
+    }
+    update(s);
+  };
+  ws.onclose = () => {
+    if ($("btnStop").textContent.indexOf("Stopping") === -1) {
+      $("offline").style.display = "block";
+      setTimeout(connect, 1500);
+    }
+  };
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function syncMatterTypeFields() {
+  const rgb = $("matterType").value === "rgb";
+  $("lblMatterCh").hidden = rgb;
+  $("rgbMatterChannels").hidden = !rgb;
+}
+$("matterType").onchange = syncMatterTypeFields;
+syncMatterTypeFields();
+
+async function matterApi(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (options.body !== undefined && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch("/api/matter/" + path.replace(/^\//, ""), { ...options, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+  return data;
+}
+
+function renderMatterDevice(device) {
+  const commissioned = device.status?.commissioned;
+  const qr = commissioned
+    ? `<p class="settings-note">Commissioned. Reset pairing to show a new QR.</p>`
+    : device.status?.qrDataUrl
+      ? `<img src="${device.status.qrDataUrl}" alt="Matter QR"><div class="settings-note">${escapeHtml(device.status.manualPairingCode || "")}</div>`
+      : `<p class="settings-note">QR unavailable</p>`;
+  const ch = device.type === "onoff"
+    ? `ch ${device.channels.channel}`
+    : `I${device.channels.intensity} R${device.channels.red} G${device.channels.green} B${device.channels.blue}`;
+  const el = document.createElement("article");
+  el.className = "matter-device";
+  el.dataset.id = device.id;
+  el.innerHTML = `
+    <div style="flex:1">
+      <h3>${escapeHtml(device.name)}
+        <span class="badge ${commissioned ? "ok" : "warn"}">${commissioned ? "Commissioned" : "Awaiting pair"}</span>
+        <span class="badge">${device.type === "rgb" ? "RGB" : "On/Off"}</span>
+      </h3>
+      <div class="meta">${ch} · Matter UDP ${device.matterPort}</div>
+      <div class="matter-actions">
+        <button type="button" class="secondary" data-matter="reset">Reset pairing</button>
+        <button type="button" class="secondary" data-matter="delete">Delete</button>
+      </div>
+    </div>
+    <div>${qr}</div>`;
+  return el;
+}
+
+async function refreshMatterDevices() {
+  const list = $("matterList");
+  try {
+    const { devices } = await matterApi("devices");
+    list.innerHTML = "";
+    if (!devices.length) {
+      list.innerHTML = `<p class="settings-note">No Matter devices yet. Create one above; it uses the Matter → MagicQ universe from Settings.</p>`;
+      return;
+    }
+    for (const device of devices) list.appendChild(renderMatterDevice(device));
+  } catch (err) {
+    list.innerHTML = `<p class="settings-note err">Matter sidecar: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+$("matterCreate").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const note = $("matterNote");
+  note.className = "settings-note";
+  note.textContent = "creating…";
+  const type = $("matterType").value;
+  const body = { type, name: $("matterName").value };
+  if (type === "onoff") body.channel = Number($("matterChannel").value);
+  else {
+    body.intensityChannel = Number($("matterI").value);
+    body.redChannel = Number($("matterR").value);
+    body.greenChannel = Number($("matterG").value);
+    body.blueChannel = Number($("matterB").value);
+  }
+  try {
+    await matterApi("devices", { method: "POST", body: JSON.stringify(body) });
+    note.className = "settings-note ok";
+    note.textContent = "Device created. Scan the QR in your smart home app.";
+    await refreshMatterDevices();
+  } catch (err) {
+    note.className = "settings-note err";
+    note.textContent = err.message;
+  }
+});
+
+$("matterList").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-matter]");
+  if (!button) return;
+  const id = button.closest(".matter-device")?.dataset.id;
+  if (!id) return;
+  try {
+    if (button.dataset.matter === "delete") {
+      if (!confirm("Delete this Matter device and its pairing state?")) return;
+      await matterApi("devices/" + id, { method: "DELETE" });
+    } else if (button.dataset.matter === "reset") {
+      if (!confirm("Erase fabrics and open a new pairing window?")) return;
+      await matterApi("devices/" + id + "/pairing/reset", { method: "POST" });
+    }
+    await refreshMatterDevices();
+  } catch (err) {
+    $("matterNote").className = "settings-note err";
+    $("matterNote").textContent = err.message;
+  }
+});
+
+bootstrapSettings();
+connect();
+refreshMatterDevices();
+setInterval(() => refreshMatterDevices().catch(() => {}), 15000);
+</script>
+</body>
+</html>

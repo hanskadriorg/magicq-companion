@@ -1,0 +1,124 @@
+# magicq-audio-bridge configuration
+#
+# All detection values have sensible defaults for techno/house.
+# Start by only changing [artnet] ip and, if needed, [audio] device.
+
+# Shared NIC and unicast destination for BOTH audio and Matter DMX.
+[network]
+# Local network interface to send from ("" = system default). e.g. "eth0".
+interface = ""
+# Unicast destination IP (used when a segment is set to unicast).
+ip = "2.0.0.15"
+
+[artnet]
+# Audio analysis → MagicQ. protocol = "artnet" | "sacn"
+protocol = "artnet"
+# Destination: Art-Net = unicast|broadcast; sACN = unicast|multicast.
+mode = "broadcast"
+# UDP port (Art-Net 6454, sACN 5568). Auto-switched when protocol changes
+# if still at the other protocol's default.
+port = 6454
+# Universe: Art-Net is often 0-based; sACN uses 1–63999.
+universe = 0
+# How many DMX frames per second to send.
+fps = 40
+# sACN source priority (0–200). Higher wins if multiple sources share a universe.
+priority = 100
+
+# Matter lights → MagicQ on the SAME interface, optionally a different universe/protocol.
+[matter]
+enabled = true
+protocol = "artnet"
+mode = "broadcast"
+port = 6454
+universe = 1
+fps = 40
+priority = 100
+
+[audio]
+samplerate = 44100
+blocksize = 512
+# Substring of the input device name ("" = system default input).
+# Run `python -m magicq_audio_bridge --list-devices` to see options.
+device = "pipewire"
+
+# DMX channel assignments (1-based addresses within the universe).
+# Section channels are 255 while that section is active, 0 otherwise.
+[channels]
+groove = 1
+breakdown = 2
+buildup = 3
+drop = 4
+# Continuous 0-255 ramp that rises during a build-up and slams to 255 on the drop.
+build_progress = 5
+# Toggles 0↔255 on every detected kick (hard edges for MagicQ BPM input).
+beat_pulse = 6
+# Overall loudness relative to the recent average (128 = "normal" level).
+energy = 7
+# Kick-band (bass) envelope follower, like a smarter 63 Hz trigger.
+kick = 8
+# 255 for ~150 ms only at the instant DROP starts (cue / strobe / macro trigger).
+# Channel 4 stays high for the whole drop look; this one is the impact flash.
+drop_hit = 9
+# 0-255: kick still present but the ear focus has shifted to mid/high
+# (pads, leads, chords). Low during pure kick grooves and breakdowns.
+melody = 10
+# 255 pulse on every 4/4 quarter note (phase-locked grid). More regular than
+# beat_pulse (ch6): keeps ticking if a kick is missed. Best for chase sync.
+four_four = 11
+# Spectral centroid: low = dark/bass-heavy, high = bright/trebly (0-255).
+centroid = 12
+# (mid+high) / bass — how open/bright the mix is vs the kick (0-255).
+tilt = 13
+# Chase speed vs BPM from energy: 255=full, 128=½, 64=¼, 32=⅛ (0.25s fades).
+bpm_rate = 14
+
+# Channel 14 (bpm_rate): energy → chase divisor within an allowed band.
+[bpm_rate]
+min = "eighth"
+max = "full"
+decay_seconds = 0
+
+[detection]
+# Bass level (relative to its rolling average, 1.0 = average) below which
+# the kick is considered absent -> breakdown.
+kick_absent_below = 0.45
+# Bass level above which the kick is considered present.
+kick_present_above = 0.80
+# Build score (0-1) above which we consider a build-up to be happening.
+build_score_on = 0.5
+# Seconds of consistent evidence required before switching section.
+evidence_seconds = 2.0
+# Minimum seconds to stay in a section before a normal (non-drop) switch.
+min_dwell_seconds = 6.0
+# How long the DROP section is held before returning to GROOVE.
+# Also adjustable live from the web UI ("Drop length").
+drop_hold_seconds = 16
+# A build-up that lasts this long without a drop falls back to GROOVE.
+build_timeout_seconds = 30.0
+# Expected build-up length in seconds (paces the build_progress ramp).
+expected_build_seconds = 12.0
+# Drop trigger: short-term energy jump ratio (now vs ~1s ago).
+drop_energy_jump = 1.35
+# Rolling baseline window in seconds (adapts to DJ gain changes).
+baseline_seconds = 45.0
+# 0 = groove/monotonous (harder builds+drops), 1 = aggressive (easier).
+# Also adjustable live from the web UI.
+intensity = 0.55
+
+# Weights for the build score (normalized at runtime).
+# Slopes = rising tension; lift/divergence catch slow filter opens.
+[build_score]
+weight_energy = 0.22
+weight_treble = 0.16
+weight_onsets = 0.16
+weight_brightness = 0.14
+weight_lift = 0.16
+weight_divergence = 0.10
+weight_activity = 0.06
+full_scale_energy_slope = 0.04
+full_scale_treble_slope = 0.05
+full_scale_onset_slope = 0.8
+full_scale_brightness_slope = 0.04
+full_scale_lift = 0.18
+full_scale_activity = 2.5

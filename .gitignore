@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+*.spec.bak
+data/
+matter_sidecar/node_modules/
+matter_sidecar/dist/
+ui_layout.json

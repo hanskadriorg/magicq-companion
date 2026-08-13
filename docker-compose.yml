@@ -1,0 +1,13 @@
+services:
+  bridge:
+    build: .
+    # Host networking: Art-Net UDP reaches the lighting network directly
+    # (including broadcast) and the dashboard is at http://<host>:8765.
+    network_mode: host
+    # Pass the sound card (e.g. the Scarlett) into the container.
+    devices:
+      - /dev/snd
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+    command: python -m magicq_audio_bridge --ui
+    restart: unless-stopped

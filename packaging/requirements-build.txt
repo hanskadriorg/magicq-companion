@@ -1,0 +1,3 @@
+# Extra packages needed only to build the Windows executable.
+-r ../requirements.txt
+pyinstaller>=6.0

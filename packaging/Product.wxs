@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX 4/5 MSI for MagicQ Audio Bridge.
+  Build after PyInstaller (dist\MagicQAudioBridge\ must exist):
+
+    wix build packaging\Product.wxs -d PayloadDir=dist\MagicQAudioBridge -o dist\MagicQAudioBridge.msi
+
+  Or let the GitHub Action do it.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="MagicQ Audio Bridge"
+      Manufacturer="magicq-audio-bridge"
+      Version="0.1.0"
+      UpgradeCode="8F3C2A1E-9B47-4D6F-A1E2-7C0D5B9E4F21"
+      Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Main" Title="MagicQ Audio Bridge" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MagicQ Audio Bridge" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="MagicQ Audio Bridge" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PayloadDir)\**" />
+    </ComponentGroup>
+
+    <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
+      <Shortcut
+          Id="AppShortcut"
+          Name="MagicQ Audio Bridge"
+          Target="[INSTALLFOLDER]MagicQAudioBridge.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveProgramsFolder" On="uninstall" />
+      <RegistryValue
+          Root="HKCU"
+          Key="Software\magicq-audio-bridge"
+          Name="Installed"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>

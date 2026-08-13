@@ -9,5 +9,5 @@ services:
       - /dev/snd
     volumes:
       - ./config.toml:/app/config.toml:ro
-    command: python -m magicq_audio_bridge --ui
+    command: python -m magicq_companion --ui
     restart: unless-stopped

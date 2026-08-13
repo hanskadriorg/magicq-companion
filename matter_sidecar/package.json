@@ -1,7 +1,7 @@
 {
   "name": "magicq-matter-sidecar",
   "version": "2.0.0",
-  "description": "Matter device nodes for magicq-audio-matter-bridge (DMX is sent by Python)",
+  "description": "Matter device nodes for magicq-companion (DMX is sent by Python)",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

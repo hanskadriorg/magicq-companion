@@ -1,10 +1,10 @@
-"""Entry point: audio in -> section analysis -> Art-Net out.
+"""Entry point for MagicQ Companion.
 
 Usage examples:
-    python -m magicq_audio_bridge --list-devices
-    python -m magicq_audio_bridge --config config.toml
-    python -m magicq_audio_bridge --ui
-    python -m magicq_audio_bridge --simulate --dry-run --fast
+    python -m magicq_companion --list-devices
+    python -m magicq_companion --config config.toml
+    python -m magicq_companion --ui
+    python -m magicq_companion --simulate --dry-run --fast
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             argv = ["--ui"]
 
     parser = argparse.ArgumentParser(
-        prog="magicq_audio_bridge",
-        description="Real-time audio section analysis to Art-Net for MagicQ.",
+        prog="magicq_companion",
+        description="MagicQ Companion: audio analysis and Matter lights to Art-Net/sACN.",
     )
     parser.add_argument(
         "--config", default=None,

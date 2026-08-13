@@ -15,7 +15,7 @@ _FRAME_VECTOR = 0x00000002
 _DMP_VECTOR = 0x02
 _DMP_ADDR_TYPE = 0xA1
 _DEFAULT_PORT = 5568
-_SOURCE_NAME = b"magicq-audio-bridge"
+_SOURCE_NAME = b"magicq-companion"
 
 
 def sacn_multicast_ip(universe: int) -> str:
@@ -40,7 +40,7 @@ class SacnSender:
         *,
         mode: str = "multicast",
         priority: int = 100,
-        source_name: str = "magicq-audio-bridge",
+        source_name: str = "magicq-companion",
         interface: str = "",
     ) -> None:
         # sACN universes are 1..63999 (0 is reserved).

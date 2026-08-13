@@ -1,4 +1,4 @@
-# magicq-audio-bridge configuration
+# MagicQ Companion configuration
 #
 # All detection values have sensible defaults for techno/house.
 # Start by only changing [artnet] ip and, if needed, [audio] device.
@@ -39,7 +39,7 @@ priority = 100
 samplerate = 44100
 blocksize = 512
 # Substring of the input device name ("" = system default input).
-# Run `python -m magicq_audio_bridge --list-devices` to see options.
+# Run `python -m magicq_companion --list-devices` to see options.
 device = "pipewire"
 
 # DMX channel assignments (1-based addresses within the universe).

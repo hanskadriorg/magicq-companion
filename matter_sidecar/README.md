@@ -1,7 +1,6 @@
 Matter.js sidecar for virtual On/Off and RGB lights.
 
-This process does **not** send Art-Net or sACN. It reports DMX channel
-levels to the Python app (`PYTHON_DMX_URL`), which uses the working
-sender from magicq-audio-bridge.
+This process does **not** send Art-Net or sACN itself. It reports DMX channel
+levels to MagicQ Companion (`PYTHON_DMX_URL`), which sends real Art-Net/sACN.
 
-Started automatically by `python -m magicq_audio_bridge --ui`.
+Started automatically by `python -m magicq_companion --ui`.

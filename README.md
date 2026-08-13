@@ -1,13 +1,14 @@
-# magicq-audio-matter-bridge
+# MagicQ Companion
 
-Fork of [magicq-audio-bridge](https://github.com/hanskadriorg/magicq-audio-bridge)
-(**v2.0.0**) that adds Matter virtual lights from
-[matter-artnet-bridge](https://github.com/hanskadriorg/matter-artnet-bridge).
+Club lighting companion for ChamSys MagicQ: live audio analysis, Matter
+virtual lights, and a single Art-Net/sACN stack you can extend later.
 
-Audio analysis and Matter devices both send DMX with this project's working
-Art-Net/sACN stack (the Node Matter process does **not** send UDP lighting
-packets). They share one network interface and unicast IP, and can use
-different protocols and universes.
+This is **v2.0.0**, renamed from `magicq-audio-matter-bridge`. It grew out of
+[magicq-audio-bridge](https://github.com/hanskadriorg/magicq-audio-bridge)
+and [matter-artnet-bridge](https://github.com/hanskadriorg/matter-artnet-bridge).
+
+Audio analysis and Matter lights both send **real Art-Net/sACN** to MagicQ
+on the same NIC, with a separate protocol/universe per segment.
 
 ```text
 [DJ mixer] --> [audio analysis] --Art-Net/sACN universe A--> [MagicQ]
@@ -89,7 +90,7 @@ Edit `config.toml`:
 - `[artnet]` — audio universe / protocol / mode
 - `[matter]` — Matter universe / protocol / mode
 - `[audio] device` — substring of the input device name
-  (list devices with `python -m magicq_audio_bridge --list-devices`)
+  (list devices with `python -m magicq_companion --list-devices`)
 
 Feed the program a clean audio signal: the DJ mixer's booth/record output
 into an audio interface input is ideal. A room microphone works but is
@@ -99,16 +100,16 @@ noisier and will make detection less reliable.
 
 ```bash
 # Live audio, sending Art-Net as configured:
-.venv/bin/python -m magicq_audio_bridge
+.venv/bin/python -m magicq_companion
 
 # Same, with the web dashboard at http://localhost:8765
-.venv/bin/python -m magicq_audio_bridge --ui
+.venv/bin/python -m magicq_companion --ui
 
 # Test the whole pipeline with a built-in synthetic techno track:
-.venv/bin/python -m magicq_audio_bridge --simulate
+.venv/bin/python -m magicq_companion --simulate
 
 # Analyze only, no Art-Net (safe to try anywhere):
-.venv/bin/python -m magicq_audio_bridge --simulate --dry-run --fast
+.venv/bin/python -m magicq_companion --simulate --dry-run --fast
 ```
 
 The console shows the detected section, BPM, and live meters. On exit the
@@ -130,10 +131,10 @@ powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
 
 Output:
 
-- `dist\MagicQAudioBridge\MagicQAudioBridge.exe` — double-click starts the UI
-- `dist\MagicQAudioBridge-windows.zip` — copy this folder anywhere
+- `dist\MagicQCompanion\MagicQCompanion.exe` — double-click starts the UI
+- `dist\MagicQCompanion-windows.zip` — copy this folder anywhere
 
-Settings are stored in `%APPDATA%\magicq-audio-bridge\config.toml` so the
+Settings are stored in `%APPDATA%\magicq-companion\config.toml` so the
 install location can stay read-only.
 
 ### MSI installer
@@ -143,7 +144,7 @@ step. Locally (Windows, with [WiX](https://wixtoolset.org/) installed):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
-wix build packaging\Product.wxs -d PayloadDir=$PWD\dist\MagicQAudioBridge -o dist\MagicQAudioBridge.msi
+wix build packaging\Product.wxs -d PayloadDir=$PWD\dist\MagicQCompanion -o dist\MagicQCompanion.msi
 ```
 
 ### Setup.exe (Inno Setup, optional)
@@ -152,15 +153,15 @@ If you prefer a classic wizard installer instead of MSI:
 
 1. Build with `packaging\build_windows.ps1`
 2. Install [Inno Setup 6](https://jrsoftware.org/isinfo.php)
-3. Compile `packaging\installer.iss` → `dist\MagicQAudioBridge-Setup.exe`
+3. Compile `packaging\installer.iss` → `dist\MagicQCompanion-Setup.exe`
 
 ### GitHub Actions
 
 Push a tag (`v0.1.0`) or run **Build Windows** from the Actions tab. It
 uploads:
 
-- `MagicQAudioBridge-windows.zip` (portable)
-- `MagicQAudioBridge.msi` (installer)
+- `MagicQCompanion-windows.zip` (portable)
+- `MagicQCompanion.msi` (installer)
 
 Windows Defender may warn on unsigned builds the first time — that is
 normal for unsigned open-source exes; use “More info → Run anyway”, or

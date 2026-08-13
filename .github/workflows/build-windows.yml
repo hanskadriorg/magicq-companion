@@ -26,12 +26,12 @@ jobs:
 
       - name: PyInstaller
         run: |
-          pyinstaller --noconfirm --clean packaging/magicq_audio_bridge.spec
-          copy config.toml dist\MagicQAudioBridge\config.toml
+          pyinstaller --noconfirm --clean packaging/magicq_companion.spec
+          copy config.toml dist\MagicQCompanion\config.toml
 
       - name: Zip portable build
         run: |
-          Compress-Archive -Path dist\MagicQAudioBridge\* -DestinationPath dist\MagicQAudioBridge-windows.zip
+          Compress-Archive -Path dist\MagicQCompanion\* -DestinationPath dist\MagicQCompanion-windows.zip
 
       - name: Install WiX
         run: dotnet tool install --global wix
@@ -40,15 +40,15 @@ jobs:
         id: msi
         continue-on-error: true
         run: |
-          wix build packaging\Product.wxs "-d" "PayloadDir=$PWD\dist\MagicQAudioBridge" -o dist\MagicQAudioBridge.msi
+          wix build packaging\Product.wxs "-d" "PayloadDir=$PWD\dist\MagicQCompanion" -o dist\MagicQCompanion.msi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: magicq-audio-bridge-windows
+          name: magicq-companion-windows
           path: |
-            dist/MagicQAudioBridge-windows.zip
-            dist/MagicQAudioBridge.msi
+            dist/MagicQCompanion-windows.zip
+            dist/MagicQCompanion.msi
           if-no-files-found: warn
 
       - name: Attach to GitHub Release
@@ -56,6 +56,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/MagicQAudioBridge-windows.zip
-            dist/MagicQAudioBridge.msi
+            dist/MagicQCompanion-windows.zip
+            dist/MagicQCompanion.msi
           fail_on_unmatched_files: false

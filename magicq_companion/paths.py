@@ -33,12 +33,12 @@ def static_dir() -> Path:
 def default_config_path() -> Path:
     """Writable config.toml location.
 
-    Frozen Windows builds use %APPDATA%\\magicq-audio-bridge so the
+    Frozen Windows builds use %APPDATA%\\magicq-companion so the
     Program Files install stays read-only. Dev runs use ./config.toml.
     """
     if is_frozen():
         appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-        cfg_dir = Path(appdata) / "magicq-audio-bridge"
+        cfg_dir = Path(appdata) / "magicq-companion"
         cfg_dir.mkdir(parents=True, exist_ok=True)
         cfg = cfg_dir / "config.toml"
         if not cfg.exists():

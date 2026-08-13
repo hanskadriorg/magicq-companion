@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec — build on Windows:
-#   pyinstaller packaging/magicq_audio_bridge.spec
+#   pyinstaller packaging/magicq_companion.spec
 
 import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH).parent.resolve()
-PKG = ROOT / "magicq_audio_bridge"
+PKG = ROOT / "magicq_companion"
 
 block_cipher = None
 
@@ -19,19 +19,23 @@ a = Analysis(
         (str(ROOT / "config.toml"), "."),
     ],
     hiddenimports=[
-        "magicq_audio_bridge",
-        "magicq_audio_bridge.__main__",
-        "magicq_audio_bridge.audio",
-        "magicq_audio_bridge.artnet",
-        "magicq_audio_bridge.config",
-        "magicq_audio_bridge.dmx",
-        "magicq_audio_bridge.features",
-        "magicq_audio_bridge.monitor",
-        "magicq_audio_bridge.paths",
-        "magicq_audio_bridge.pipeline",
-        "magicq_audio_bridge.simulate",
-        "magicq_audio_bridge.state_machine",
-        "magicq_audio_bridge.ui",
+        "magicq_companion",
+        "magicq_companion.__main__",
+        "magicq_companion.audio",
+        "magicq_companion.artnet",
+        "magicq_companion.config",
+        "magicq_companion.dmx",
+        "magicq_companion.features",
+        "magicq_companion.monitor",
+        "magicq_companion.paths",
+        "magicq_companion.pipeline",
+        "magicq_companion.simulate",
+        "magicq_companion.state_machine",
+        "magicq_companion.ui",
+        "magicq_companion.netif",
+        "magicq_companion.output",
+        "magicq_companion.sacn",
+        "magicq_companion.matter_runtime",
         "numpy",
         "sounddevice",
         "aiohttp",
@@ -60,7 +64,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="MagicQAudioBridge",
+    name="MagicQCompanion",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -81,5 +85,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="MagicQAudioBridge",
+    name="MagicQCompanion",
 )

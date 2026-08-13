@@ -1015,7 +1015,7 @@ def run_ui(
                 f"Port {port} is already in use (another bridge UI still running?).\n"
                 f"Stop it with:  fuser -k {port}/tcp\n"
                 f"Or open the existing dashboard and click Stop server,\n"
-                f"or pick another port:  python -m magicq_audio_bridge --ui --ui-port {port + 1}"
+                f"or pick another port:  python -m magicq_companion --ui --ui-port {port + 1}"
             ) from None
         raise
     finally:

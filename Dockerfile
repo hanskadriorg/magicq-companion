@@ -13,9 +13,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY magicq_audio_bridge/ magicq_audio_bridge/
+COPY magicq_companion/ magicq_companion/
 COPY config.toml .
 
 EXPOSE 8765
 
-CMD ["python", "-m", "magicq_audio_bridge", "--ui"]
+CMD ["python", "-m", "magicq_companion", "--ui"]

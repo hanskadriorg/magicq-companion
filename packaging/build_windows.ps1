@@ -15,19 +15,19 @@ if (-not (Test-Path .venv)) {
 .\.venv\Scripts\pip install pyinstaller
 
 Write-Host "==> Running PyInstaller..."
-Remove-Item -Recurse -Force dist\MagicQAudioBridge -ErrorAction SilentlyContinue
-.\.venv\Scripts\pyinstaller --noconfirm --clean packaging\magicq_audio_bridge.spec
+Remove-Item -Recurse -Force dist\MagicQCompanion -ErrorAction SilentlyContinue
+.\.venv\Scripts\pyinstaller --noconfirm --clean packaging\magicq_companion.spec
 
 # Ship a starter config next to the exe (also copied into AppData on first run).
-Copy-Item config.toml dist\MagicQAudioBridge\config.toml -Force
+Copy-Item config.toml dist\MagicQCompanion\config.toml -Force
 
-$zip = "dist\MagicQAudioBridge-windows.zip"
+$zip = "dist\MagicQCompanion-windows.zip"
 if (Test-Path $zip) { Remove-Item $zip }
-Compress-Archive -Path dist\MagicQAudioBridge\* -DestinationPath $zip
+Compress-Archive -Path dist\MagicQCompanion\* -DestinationPath $zip
 
 Write-Host ""
 Write-Host "Portable build ready:"
-Write-Host "  dist\MagicQAudioBridge\MagicQAudioBridge.exe"
+Write-Host "  dist\MagicQCompanion\MagicQCompanion.exe"
 Write-Host "  $zip"
 Write-Host ""
 Write-Host "Optional MSI/Setup: install Inno Setup 6, then compile packaging\installer.iss"

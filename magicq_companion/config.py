@@ -99,7 +99,7 @@ class DetectionConfig:
     drop_min_in_state: float = 0.25
     # Energy (or bass) that many seconds ago must be below this, so a
     # single groove kick is not treated as a drop.
-    drop_quiet_below: float = 0.75
+    drop_quiet_below: float = 1.8
     # If true, a slam can fire even while still in GROOVE.
     drop_from_groove: bool = True
 

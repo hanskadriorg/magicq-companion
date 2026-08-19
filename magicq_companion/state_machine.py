@@ -8,7 +8,6 @@ flicker at section boundaries.
 from __future__ import annotations
 
 import math
-import statistics
 from collections import deque
 from enum import Enum
 
@@ -156,18 +155,17 @@ class SectionTracker:
             return
 
     def _drop_triggered(self, f: Features) -> bool:
-        """Drop = a sudden rise out of a quieter moment.
+        """Drop = energy now louder than the recent peak by a set amount.
 
-        Primary cue (club-snappy): energy/bass climbs by a configured
-        amount inside drop_rise_window_seconds (default 0.5 s), after
-        the lookback sample was still quiet. Older contrast / flux
-        paths remain as backups.
+        That is a rise-of-N in ~drop_rise_window_seconds, but compared to
+        the peak in that window (not a single trough 0.5 s ago) so a
+        groove kick does not count. Breakdown bass-slam remains a backup.
         """
         cfg = self.cfg
         if self._t_total < WARMUP_SECONDS:
             return False
         window = max(0.08, float(cfg.drop_rise_window_seconds))
-        need = max(4, int(window * self._frame_rate))
+        need = max(8, int(window * self._frame_rate) + 2)
         if len(self._energy_hist) < need or len(self._bass_hist) < need:
             return False
 
@@ -178,49 +176,31 @@ class SectionTracker:
         jump = self._drop_jump_ratio()
         e_now = self._energy_smooth
         b_now = self._bass_smooth
-        e_ago = _sample_ago(self._energy_hist, self._frame_rate, window)
         b_ago = _sample_ago(self._bass_hist, self._frame_rate, window)
-        quiet_below = float(cfg.drop_quiet_below)
-        was_quiet = e_ago < quiet_below or b_ago < cfg.kick_absent_below
-        bass_in = b_now > (0.75 - 0.10 * self.intensity)
-        rose = (e_now - e_ago) >= float(cfg.drop_rise_amount)
-        ratio = e_ago > 0.05 and e_now >= e_ago * jump
-        fast_rise = was_quiet and bass_in and (rose or ratio)
+        # Peak in the lookback window, excluding the last ~80 ms (this slam).
+        e_peak = _range_max(self._energy_hist, self._frame_rate, 0.08, window)
+        b_peak = _range_max(self._bass_hist, self._frame_rate, 0.08, window)
+        bass_in = b_now > cfg.kick_present_above
+        loud_now = e_now > (1.05 - 0.15 * self.intensity)
+        amount = float(cfg.drop_rise_amount)
+        rose = (e_now - e_peak) >= amount or (b_now - b_peak) >= amount
+        ratio = e_peak > 0.05 and e_now >= e_peak * jump
+        from_quieter = e_peak < float(cfg.drop_quiet_below)
+        fast_rise = bass_in and loud_now and from_quieter and (rose or ratio)
 
-        # Classic drop out of a breakdown/kick-gap.
         bass_slam = b_now > (1.35 - 0.25 * self.intensity) and b_ago < 0.40
 
-        # Local contrast: energy now vs the quietest recent moment.
-        local_contrast = False
-        n4 = max(need, int(4.0 * self._frame_rate))
-        if len(self._energy_long) >= n4 // 2:
-            floor = min(list(self._energy_long)[-n4:])
-            local_contrast = (
-                floor > 0.15
-                and e_now > floor * (1.55 - 0.35 * self.intensity)
-                and b_now > 0.85
-            )
-
-        # Spectral novelty spike with bass present (transient "hit").
-        flux_spike = False
-        if len(self._flux_hist) >= 8:
-            flux_med = statistics.median(self._flux_hist)
-            flux_spike = (
-                flux_med > 0
-                and self._flux_smooth > flux_med * (2.2 - 0.6 * self.intensity)
-                and b_now > 0.9
-                and e_now > e_ago * 1.1
-            )
-
-        # Late in a strong build, accept a softer energy jump.
         soft_payoff = (
             self.state is Section.BUILDUP
             and self.build_progress > 0.55
-            and e_now > e_ago * max(1.12, jump * 0.85)
+            and e_now > e_peak * max(1.12, jump * 0.85)
             and b_now > 0.85
         )
 
-        return fast_rise or bass_slam or local_contrast or flux_spike or soft_payoff
+        if self.state is Section.GROOVE:
+            return fast_rise
+
+        return fast_rise or bass_slam or soft_payoff
 
     def _update_build_progress(self, f: Features, dt: float) -> None:
         if self.state is Section.BUILDUP:
@@ -241,6 +221,18 @@ def _sample_ago(hist: deque[float], frame_rate: float, seconds: float) -> float:
         return 0.0
     back = max(0, min(n - 1, int(round(seconds * frame_rate))))
     return hist[n - 1 - back]
+
+
+def _range_max(hist: deque[float], frame_rate: float, lo_s: float, hi_s: float) -> float:
+    """Max of samples from lo_s–hi_s ago (excludes the newest tail)."""
+    n = len(hist)
+    if n == 0:
+        return 0.0
+    start = n - 1 - max(0, int(round(hi_s * frame_rate)))
+    stop = n - 1 - max(0, int(round(lo_s * frame_rate)))
+    start = max(0, min(n - 1, start))
+    stop = max(start + 1, min(n, stop + 1))
+    return max(list(hist)[start:stop])
 
 
 def _accumulate(value: float, condition: bool, dt: float) -> float:

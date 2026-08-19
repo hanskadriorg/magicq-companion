@@ -109,13 +109,13 @@ intensity = 0.55
 # Look back this far for a sudden rise (seconds).
 drop_rise_window_seconds = 0.5
 # Energy (vs recent average) must climb by at least this in that window.
-drop_rise_amount = 0.40
+drop_rise_amount = 0.4
 # Drop-envelope smoothing. Lower = faster, more twitchy.
 drop_smooth_seconds = 0.15
 # Must have been in the current section at least this long (seconds).
 drop_min_in_state = 0.25
-# The lookback sample must be quieter than this, so groove kicks don't fire.
-drop_quiet_below = 0.75
+# Recent peak in the rise window must be below this. Higher = easier.
+drop_quiet_below = 1.8
 # Allow a drop even if the buildup was not detected (still in groove).
 drop_from_groove = true
 

@@ -589,9 +589,9 @@
         <input type="number" id="inDropMinIn" min="0" max="4" step="0.05" value="0.25">
         <span class="field-help">Ignore slams this soon after entering buildup/breakdown/groove.</span>
       </label>
-      <label>Quiet-before threshold
-        <input type="number" id="inDropQuiet" min="0.1" max="1.5" step="0.05" value="0.75">
-        <span class="field-help">The lookback sample must be quieter than this, so groove kicks don’t fire.</span>
+      <label>Quiet-before (recent peak below)
+        <input type="number" id="inDropQuiet" min="0.1" max="4" step="0.05" value="1.8">
+        <span class="field-help">Recent peak in the window must be below this. Higher = easier (2 = slam out of a loud groove).</span>
       </label>
       <label class="check">
         <input type="checkbox" id="chkDropFromGroove" checked>

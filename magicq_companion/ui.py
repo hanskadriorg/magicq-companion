@@ -888,7 +888,7 @@ def run_ui(
             ("drop_rise_amount", drop_rise_amount, 0.05, 2.0),
             ("drop_smooth_seconds", drop_smooth_seconds, 0.04, 1.0),
             ("drop_min_in_state", drop_min_in_state, 0.0, 4.0),
-            ("drop_quiet_below", drop_quiet_below, 0.1, 1.5),
+            ("drop_quiet_below", drop_quiet_below, 0.1, 4.0),
         )
         parsed_drop = {}
         for name, raw, lo, hi in drop_floats:

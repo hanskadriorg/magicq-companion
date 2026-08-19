@@ -190,6 +190,13 @@ class _Manager:
             "bpm_rate_decay": br.decay_seconds,
             "intensity": self.cfg.detection.intensity,
             "drop_hold_seconds": self.cfg.detection.drop_hold_seconds,
+            "drop_energy_jump": self.cfg.detection.drop_energy_jump,
+            "drop_rise_window_seconds": self.cfg.detection.drop_rise_window_seconds,
+            "drop_rise_amount": self.cfg.detection.drop_rise_amount,
+            "drop_smooth_seconds": self.cfg.detection.drop_smooth_seconds,
+            "drop_min_in_state": self.cfg.detection.drop_min_in_state,
+            "drop_quiet_below": self.cfg.detection.drop_quiet_below,
+            "drop_from_groove": bool(self.cfg.detection.drop_from_groove),
             "enabled": self.enabled,
             "analyzing": self.analyzing,
             "dry_run": self.dry_run,
@@ -305,6 +312,13 @@ class _Manager:
         matter_port: int | None = None,
         matter_priority: int | None = None,
         matter_enabled: bool | None = None,
+        drop_energy_jump: float | None = None,
+        drop_rise_window_seconds: float | None = None,
+        drop_rise_amount: float | None = None,
+        drop_smooth_seconds: float | None = None,
+        drop_min_in_state: float | None = None,
+        drop_quiet_below: float | None = None,
+        drop_from_groove: bool | None = None,
     ) -> str:
         with self.ctl_lock:
             cfg = self.cfg
@@ -389,6 +403,24 @@ class _Manager:
             ):
                 cfg.detection.drop_hold_seconds = drop_hold_seconds
                 drop_changed = True
+            sense_changed = False
+            for key, value in (
+                ("drop_energy_jump", drop_energy_jump),
+                ("drop_rise_window_seconds", drop_rise_window_seconds),
+                ("drop_rise_amount", drop_rise_amount),
+                ("drop_smooth_seconds", drop_smooth_seconds),
+                ("drop_min_in_state", drop_min_in_state),
+                ("drop_quiet_below", drop_quiet_below),
+            ):
+                if value is not None and value != getattr(cfg.detection, key):
+                    setattr(cfg.detection, key, value)
+                    sense_changed = True
+            if (
+                drop_from_groove is not None
+                and bool(drop_from_groove) != bool(cfg.detection.drop_from_groove)
+            ):
+                cfg.detection.drop_from_groove = bool(drop_from_groove)
+                sense_changed = True
 
             if (
                 not device_changed
@@ -397,6 +429,7 @@ class _Manager:
                 and not bpm_changed
                 and not intensity_changed
                 and not drop_changed
+                and not sense_changed
             ):
                 return "No changes to apply."
 
@@ -441,6 +474,8 @@ class _Manager:
                 parts.append(f"intensity {cfg.detection.intensity:.0%}")
             if drop_changed:
                 parts.append(f"drop length {cfg.detection.drop_hold_seconds:g}s")
+            if sense_changed:
+                parts.append("drop sensing")
             note = " and ".join(parts)
             if self.dry_run and (audio_changed or matter_changed):
                 note += " (dry run: not sending)"
@@ -485,6 +520,26 @@ class _Manager:
         )
         text = self._upsert_in_section(
             text, "detection", "drop_hold_seconds", self.cfg.detection.drop_hold_seconds
+        )
+        det = self.cfg.detection
+        text = self._upsert_in_section(text, "detection", "drop_energy_jump", det.drop_energy_jump)
+        text = self._upsert_in_section(
+            text, "detection", "drop_rise_window_seconds", det.drop_rise_window_seconds
+        )
+        text = self._upsert_in_section(
+            text, "detection", "drop_rise_amount", det.drop_rise_amount
+        )
+        text = self._upsert_in_section(
+            text, "detection", "drop_smooth_seconds", det.drop_smooth_seconds
+        )
+        text = self._upsert_in_section(
+            text, "detection", "drop_min_in_state", det.drop_min_in_state
+        )
+        text = self._upsert_in_section(
+            text, "detection", "drop_quiet_below", det.drop_quiet_below
+        )
+        text = self._upsert_in_section(
+            text, "detection", "drop_from_groove", det.drop_from_groove
         )
         text = self._persist_bpm_rate(text)
         path.write_text(text)
@@ -633,6 +688,13 @@ def run_ui(
         bpm_rate_decay = body.get("bpm_rate_decay")
         intensity = body.get("intensity")
         drop_hold_seconds = body.get("drop_hold_seconds")
+        drop_energy_jump = body.get("drop_energy_jump")
+        drop_rise_window_seconds = body.get("drop_rise_window_seconds")
+        drop_rise_amount = body.get("drop_rise_amount")
+        drop_smooth_seconds = body.get("drop_smooth_seconds")
+        drop_min_in_state = body.get("drop_min_in_state")
+        drop_quiet_below = body.get("drop_quiet_below")
+        drop_from_groove = body.get("drop_from_groove")
         protocol = body.get("protocol")
         mode = body.get("mode")
         port = body.get("port")
@@ -820,6 +882,32 @@ def run_ui(
                 return web.json_response(
                     {"error": "drop length must be 2–120 seconds"}, status=400
                 )
+        drop_floats = (
+            ("drop_energy_jump", drop_energy_jump, 1.0, 4.0),
+            ("drop_rise_window_seconds", drop_rise_window_seconds, 0.1, 2.0),
+            ("drop_rise_amount", drop_rise_amount, 0.05, 2.0),
+            ("drop_smooth_seconds", drop_smooth_seconds, 0.04, 1.0),
+            ("drop_min_in_state", drop_min_in_state, 0.0, 4.0),
+            ("drop_quiet_below", drop_quiet_below, 0.1, 1.5),
+        )
+        parsed_drop = {}
+        for name, raw, lo, hi in drop_floats:
+            if raw is None:
+                parsed_drop[name] = None
+                continue
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": f"{name} must be a number"}, status=400
+                )
+            if not lo <= val <= hi:
+                return web.json_response(
+                    {"error": f"{name} must be {lo:g}–{hi:g}"}, status=400
+                )
+            parsed_drop[name] = val
+        if drop_from_groove is not None:
+            drop_from_groove = bool(drop_from_groove)
         loop = asyncio.get_running_loop()
         try:
             message = await loop.run_in_executor(
@@ -844,6 +932,13 @@ def run_ui(
                     matter_port,
                     matter_priority,
                     matter_enabled,
+                    parsed_drop["drop_energy_jump"],
+                    parsed_drop["drop_rise_window_seconds"],
+                    parsed_drop["drop_rise_amount"],
+                    parsed_drop["drop_smooth_seconds"],
+                    parsed_drop["drop_min_in_state"],
+                    parsed_drop["drop_quiet_below"],
+                    drop_from_groove,
                 ),
             )
         except Exception as exc:  # e.g. unknown device name

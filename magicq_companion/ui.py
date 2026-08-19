@@ -544,6 +544,43 @@ class _Manager:
         return text.rstrip() + "\n\n" + section
 
 
+def dashboard_urls(host: str, port: int) -> list[str]:
+    """Human-readable dashboard URLs for startup logs."""
+    if host not in ("0.0.0.0", "::", ""):
+        h = "127.0.0.1" if host in ("localhost", "::1") else host
+        return [f"http://{h}:{port}"]
+
+    from .netif import list_ipv4_interfaces
+
+    urls: list[str] = []
+    seen: set[str] = set()
+    for nic in list_ipv4_interfaces():
+        ip = (nic.get("ip") or "").strip()
+        if not ip or ip.startswith("127.") or ip in seen:
+            continue
+        seen.add(ip)
+        urls.append(f"http://{ip}:{port}")
+    if not urls:
+        urls.append(f"http://127.0.0.1:{port}")
+    return urls
+
+
+def _print_dashboard_urls(host: str, port: int) -> None:
+    urls = dashboard_urls(host, port)
+    print(f"Dashboard (this Pi): http://127.0.0.1:{port}")
+    if host in ("0.0.0.0", "::", "") and len(urls) > 0:
+        print("Dashboard (LAN — use from phone/tablet/FOH):")
+        for url in urls:
+            print(f"  {url}")
+        print(
+            "If other devices cannot connect, open the firewall:\n"
+            f"  sudo ufw allow {port}/tcp\n"
+            "  (or run: bash packaging/open-dashboard-port.sh)"
+        )
+    elif host not in ("0.0.0.0", "::", ""):
+        print(f"Dashboard: {urls[0]}")
+
+
 def run_ui(
     cfg: Config,
     source_factory: Callable,
@@ -553,6 +590,7 @@ def run_ui(
     config_path: str | None,
     simulate: bool,
     port: int,
+    host: str = "0.0.0.0",
 ) -> None:
     manager = _Manager(
         cfg, source_factory, dry_run, pace, duration, config_path, simulate
@@ -1006,9 +1044,9 @@ def run_ui(
     app.router.add_post("/internal/matter/dmx", matter_dmx_handler)
     app.router.add_route("*", "/api/matter/{path:.*}", matter_proxy_handler)
 
-    print(f"Dashboard: http://localhost:{port}")
+    _print_dashboard_urls(host, port)
     try:
-        web.run_app(app, host="0.0.0.0", port=port, print=None)
+        web.run_app(app, host=host, port=port, print=None)
     except OSError as exc:
         if getattr(exc, "errno", None) == 98 or "address already in use" in str(exc):
             raise SystemExit(

@@ -202,6 +202,22 @@ detected section, the outgoing DMX channel values, and a log of section
 transitions. It is reachable from other machines on the network too
 (e.g. a tablet at FOH: `http://<pc-ip>:8765`).
 
+The dashboard binds to **all interfaces** (`0.0.0.0`) by default. If
+`http://127.0.0.1:8765` works on the Pi but `http://<pi-ip>:8765` does
+not from another computer, the server is running — **open the firewall**
+(Raspberry Pi OS often enables `ufw`):
+
+```bash
+sudo ufw allow 8765/tcp
+# or, from the repo:
+bash packaging/open-dashboard-port.sh
+```
+
+On startup, `--ui` prints the LAN URLs it detected. Use the Pi's **actual
+NIC address** (from `hostname -I` or the startup log), not necessarily
+the MagicQ Art-Net IP in `config.toml` unless that is the only address
+on the machine.
+
 The **Settings** panel at the top lets you pick the audio input device,
 Art-Net target IP, and universe while the bridge is running. Apply writes
 the values back to `config.toml`. Changing the input device restarts

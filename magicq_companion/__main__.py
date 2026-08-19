@@ -66,6 +66,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--ui-port", type=int, default=8765,
         help="Port for the web dashboard (default: 8765)",
     )
+    parser.add_argument(
+        "--ui-host", default="0.0.0.0",
+        help="Address to bind the dashboard (default: 0.0.0.0 = all interfaces)",
+    )
     return parser.parse_args(argv)
 
 
@@ -135,6 +139,7 @@ def main() -> int:
             config_path=config_path,
             simulate=args.simulate,
             port=args.ui_port,
+            host=args.ui_host,
         )
         return 0
 

@@ -286,6 +286,28 @@
   .badge.ok { color: #48bb78; border-color: #2a5a3c; }
   .badge.warn { color: var(--buildup); border-color: #5a4420; }
   .matter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; z-index: 40;
+    background: rgba(0,0,0,.62);
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid #2a3140; border-radius: 16px;
+    padding: 22px 24px 20px; width: min(520px, 100%); max-height: 90vh;
+    overflow: auto; box-shadow: 0 18px 50px rgba(0,0,0,.45);
+  }
+  .modal h2 { margin-bottom: 8px; }
+  .modal .hint { font-size: 13px; color: var(--dim); line-height: 1.45; margin-bottom: 16px; }
+  .modal .settings { margin-top: 0; }
+  .modal .actions { margin-top: 8px; justify-content: flex-end; width: 100%; }
+  .modal label.check {
+    flex-direction: row; align-items: center; gap: 10px; text-transform: none;
+    letter-spacing: 0; font-size: 13px; color: var(--text);
+  }
+  .modal label.check input { width: auto; min-width: 0; accent-color: var(--groove); }
+  .modal .field-help { font-size: 11px; color: var(--dim); letter-spacing: 0; text-transform: none; }
 </style>
 </head>
 <body>
@@ -410,6 +432,9 @@
           <input type="range" id="rngDropHold" min="2" max="60" step="1" value="16">
           <span class="slider-val" id="lblDropHold">16 s</span>
         </label>
+        <div class="actions">
+          <button type="button" class="secondary" id="btnDropSense" title="Tune how a drop is detected">Drop sensing…</button>
+        </div>
         <label>Ch 14 rate from (quiet)
           <select id="selBpmMin">
             <option value="eighth">1/8 (32)</option>
@@ -537,6 +562,48 @@
   </div>
 
   <div class="offline" id="offline">source stopped or connection lost &mdash; retrying&hellip;</div>
+</div>
+
+<div class="modal-backdrop" id="dropSenseModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dropSenseTitle">
+    <h2 id="dropSenseTitle">Drop sensing</h2>
+    <p class="hint">How a drop is detected: a rise of energy/bass in a short window, after the mix was still quiet. Saved to <code>config.toml</code> on this Pi.</p>
+    <div class="settings">
+      <label>Rise window (seconds)
+        <input type="number" id="inDropWindow" min="0.1" max="2" step="0.05" value="0.5">
+        <span class="field-help">Look back this far. 0.5 s is snappy; 1 s is more patient.</span>
+      </label>
+      <label>Rise amount
+        <input type="number" id="inDropAmount" min="0.05" max="2" step="0.05" value="0.4">
+        <span class="field-help">Energy must climb by this much in that window (1.0 = “normal” level).</span>
+      </label>
+      <label>Jump ratio
+        <input type="number" id="inDropJump" min="1" max="4" step="0.05" value="1.35">
+        <span class="field-help">Or energy now must be this times energy then (1.35 = 35% louder).</span>
+      </label>
+      <label>Smoothing (seconds)
+        <input type="number" id="inDropSmooth" min="0.04" max="1" step="0.01" value="0.15">
+        <span class="field-help">Lower = faster and twitchier. 0.15 s is a good club default.</span>
+      </label>
+      <label>Min time in section (seconds)
+        <input type="number" id="inDropMinIn" min="0" max="4" step="0.05" value="0.25">
+        <span class="field-help">Ignore slams this soon after entering buildup/breakdown/groove.</span>
+      </label>
+      <label>Quiet-before (recent peak below)
+        <input type="number" id="inDropQuiet" min="0.1" max="4" step="0.05" value="1.8">
+        <span class="field-help">Recent peak in the window must be below this. Higher = easier (2 = slam out of a loud groove).</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="chkDropFromGroove" checked>
+        Allow drop from groove (if the buildup was missed)
+      </label>
+      <div class="actions">
+        <button type="button" class="secondary" id="btnDropSenseCancel">Cancel</button>
+        <button type="button" id="btnDropSenseSave">Save to Pi</button>
+      </div>
+    </div>
+    <div class="settings-note" id="dropSenseNote"></div>
+  </div>
 </div>
 
 <script>
@@ -1020,6 +1087,7 @@ function applyMetaToForm(meta, devices, interfaces) {
     $("rngDropHold").value = String(Math.round(Number(meta.drop_hold_seconds)));
     syncDropHoldLabel();
   }
+  fillDropSenseForm(meta);
   if (meta.enabled !== undefined) setEnableUI(meta.enabled);
   if (meta.analyzing !== undefined) setAnalyzeUI(meta.analyzing);
   $("meta").innerHTML = `${meta.source || ""}<br>${meta.artnet || ""}<br>${meta.matter || ""}`;
@@ -1187,6 +1255,72 @@ $("selMatterProtocol").onchange = () => {
 $("selMode").onchange = syncOutputLabels;
 $("selMatterMode").onchange = syncOutputLabels;
 syncOutputLabels();
+
+function fillDropSenseForm(meta) {
+  if (!meta) return;
+  if (meta.drop_rise_window_seconds != null) $("inDropWindow").value = Number(meta.drop_rise_window_seconds);
+  if (meta.drop_rise_amount != null) $("inDropAmount").value = Number(meta.drop_rise_amount);
+  if (meta.drop_energy_jump != null) $("inDropJump").value = Number(meta.drop_energy_jump);
+  if (meta.drop_smooth_seconds != null) $("inDropSmooth").value = Number(meta.drop_smooth_seconds);
+  if (meta.drop_min_in_state != null) $("inDropMinIn").value = Number(meta.drop_min_in_state);
+  if (meta.drop_quiet_below != null) $("inDropQuiet").value = Number(meta.drop_quiet_below);
+  if (meta.drop_from_groove != null) $("chkDropFromGroove").checked = !!meta.drop_from_groove;
+}
+
+function openDropSense() {
+  $("dropSenseNote").className = "settings-note";
+  $("dropSenseNote").textContent = "";
+  $("dropSenseModal").classList.add("open");
+}
+function closeDropSense() {
+  $("dropSenseModal").classList.remove("open");
+}
+$("btnDropSense").onclick = openDropSense;
+$("btnDropSenseCancel").onclick = closeDropSense;
+$("dropSenseModal").addEventListener("click", (e) => {
+  if (e.target === $("dropSenseModal")) closeDropSense();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("dropSenseModal").classList.contains("open")) closeDropSense();
+});
+
+$("btnDropSenseSave").onclick = async () => {
+  const btn = $("btnDropSenseSave"), note = $("dropSenseNote");
+  btn.disabled = true;
+  note.className = "settings-note";
+  note.textContent = "saving\u2026";
+  const body = {
+    drop_rise_window_seconds: Number($("inDropWindow").value),
+    drop_rise_amount: Number($("inDropAmount").value),
+    drop_energy_jump: Number($("inDropJump").value),
+    drop_smooth_seconds: Number($("inDropSmooth").value),
+    drop_min_in_state: Number($("inDropMinIn").value),
+    drop_quiet_below: Number($("inDropQuiet").value),
+    drop_from_groove: $("chkDropFromGroove").checked,
+  };
+  try {
+    const r = await fetch("/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      note.className = "settings-note ok";
+      note.textContent = d.message + " (saved to config.toml)";
+      $("settingsNote").className = "settings-note ok";
+      $("settingsNote").textContent = d.message;
+      setTimeout(closeDropSense, 700);
+    } else {
+      note.className = "settings-note err";
+      note.textContent = d.error || "failed to save";
+    }
+  } catch (e) {
+    note.className = "settings-note err";
+    note.textContent = "failed to save: " + e;
+  }
+  btn.disabled = false;
+};
 
 $("btnApply").onclick = async () => {
   const btn = $("btnApply"), note = $("settingsNote");

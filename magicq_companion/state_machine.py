@@ -8,10 +8,8 @@ flicker at section boundaries.
 from __future__ import annotations
 
 import math
-import statistics
 from collections import deque
 from enum import Enum
-from itertools import islice
 
 from .config import DetectionConfig
 from .features import WARMUP_SECONDS, Features
@@ -38,14 +36,12 @@ class SectionTracker:
         self._ev_fizzle = 0.0
 
         # Smoothed signals for the drop trigger. Raw bass/energy pulse to
-        # near zero between kicks, so everything here is smoothed over
-        # slightly more than one kick period before being compared.
-        n = int(1.5 * frame_rate)
-        # Longer window for local contrast (floor of recent energy).
-        n_long = int(4.0 * frame_rate)
+        # near zero between kicks, so everything here is smoothed before
+        # being compared. Time constant comes from cfg.drop_smooth_seconds.
+        n = int(8.0 * frame_rate)
         self._bass_hist: deque[float] = deque(maxlen=n)
         self._energy_hist: deque[float] = deque(maxlen=n)
-        self._energy_long: deque[float] = deque(maxlen=n_long)
+        self._energy_long: deque[float] = deque(maxlen=n)
         self._flux_hist: deque[float] = deque(maxlen=n)
         self._frame_rate = frame_rate
         self._t_total = 0.0
@@ -83,7 +79,8 @@ class SectionTracker:
         self.t_in_state += dt
         self._t_total += dt
 
-        alpha_fast = 1.0 - math.exp(-dt / 0.6)
+        tau = max(0.04, float(cfg.drop_smooth_seconds))
+        alpha_fast = 1.0 - math.exp(-dt / tau)
         self._bass_smooth += alpha_fast * (f.bass_norm - self._bass_smooth)
         self._energy_smooth += alpha_fast * (f.energy_norm - self._energy_smooth)
         self._flux_smooth += alpha_fast * (f.flux - self._flux_smooth)
@@ -120,9 +117,14 @@ class SectionTracker:
         state = self.state
         dwell_ok = self.t_in_state >= self._min_dwell()
         need = self._evidence_need()
+        cfg = self.cfg
 
-        # The drop can interrupt a build-up or breakdown at any moment.
-        if state in (Section.BUILDUP, Section.BREAKDOWN) and self._drop_triggered(f):
+        # The drop can interrupt a build-up or breakdown at any moment,
+        # and optionally a groove if the slam is obvious (missed buildup).
+        drop_states = (Section.BUILDUP, Section.BREAKDOWN)
+        if cfg.drop_from_groove:
+            drop_states = (Section.BUILDUP, Section.BREAKDOWN, Section.GROOVE)
+        if state in drop_states and self._drop_triggered(f):
             self.state = Section.DROP
             return
 
@@ -153,66 +155,52 @@ class SectionTracker:
             return
 
     def _drop_triggered(self, f: Features) -> bool:
-        """Drop = bass slam, energy jump, or local contrast after a build.
+        """Drop = energy now louder than the recent peak by a set amount.
 
-        Inspired by EDM switch-point / novelty research: energy contrast
-        vs a recent floor, bass re-entry, and spectral-flux spike — not
-        only a single ratio against ~1 s ago.
+        That is a rise-of-N in ~drop_rise_window_seconds, but compared to
+        the peak in that window (not a single trough 0.5 s ago) so a
+        groove kick does not count. Breakdown bass-slam remains a backup.
         """
+        cfg = self.cfg
         if self._t_total < WARMUP_SECONDS:
             return False
-        if len(self._bass_hist) < self._bass_hist.maxlen:
+        window = max(0.08, float(cfg.drop_rise_window_seconds))
+        need = max(8, int(window * self._frame_rate) + 2)
+        if len(self._energy_hist) < need or len(self._bass_hist) < need:
             return False
 
-        bass_ago = _window_median(self._bass_hist, self._frame_rate)
-        energy_ago = _window_median(self._energy_hist, self._frame_rate)
+        min_in = max(0.0, float(cfg.drop_min_in_state))
+        if self.t_in_state < min_in:
+            return False
+
         jump = self._drop_jump_ratio()
+        e_now = self._energy_smooth
+        b_now = self._bass_smooth
+        b_ago = _sample_ago(self._bass_hist, self._frame_rate, window)
+        # Peak in the lookback window, excluding the last ~80 ms (this slam).
+        e_peak = _range_max(self._energy_hist, self._frame_rate, 0.08, window)
+        b_peak = _range_max(self._bass_hist, self._frame_rate, 0.08, window)
+        bass_in = b_now > cfg.kick_present_above
+        loud_now = e_now > (1.05 - 0.15 * self.intensity)
+        amount = float(cfg.drop_rise_amount)
+        rose = (e_now - e_peak) >= amount or (b_now - b_peak) >= amount
+        ratio = e_peak > 0.05 and e_now >= e_peak * jump
+        from_quieter = e_peak < float(cfg.drop_quiet_below)
+        fast_rise = bass_in and loud_now and from_quieter and (rose or ratio)
 
-        # Classic drop out of a breakdown/kick-gap.
-        bass_slam = self._bass_smooth > (1.35 - 0.25 * self.intensity) and bass_ago < 0.40
+        bass_slam = b_now > (1.35 - 0.25 * self.intensity) and b_ago < 0.40
 
-        # Drop out of a kick-driven build: sudden loudness jump with bass.
-        energy_jump = (
-            self._energy_smooth > energy_ago * jump
-            and self._bass_smooth > 0.75
-            and self._energy_smooth > (1.05 - 0.15 * self.intensity)
-            and self.t_in_state > 1.5
-        )
-
-        # Local contrast: energy now vs the quietest recent moment
-        # (catches drops after a snare fill / duck that slope-ratio misses).
-        local_contrast = False
-        if len(self._energy_long) >= self._energy_long.maxlen // 2:
-            floor = min(self._energy_long)
-            local_contrast = (
-                floor > 0.15
-                and self._energy_smooth > floor * (1.55 - 0.35 * self.intensity)
-                and self._bass_smooth > 0.85
-                and self.t_in_state > 1.5
-            )
-
-        # Spectral novelty spike with bass present (transient "hit").
-        flux_spike = False
-        if len(self._flux_hist) >= 8:
-            flux_med = statistics.median(self._flux_hist)
-            flux_spike = (
-                flux_med > 0
-                and self._flux_smooth > flux_med * (2.2 - 0.6 * self.intensity)
-                and self._bass_smooth > 0.9
-                and self._energy_smooth > energy_ago * 1.1
-                and self.t_in_state > 1.5
-            )
-
-        # Late in a strong build, accept a softer energy jump.
         soft_payoff = (
             self.state is Section.BUILDUP
             and self.build_progress > 0.55
-            and self._energy_smooth > energy_ago * max(1.12, jump * 0.85)
-            and self._bass_smooth > 0.85
-            and self.t_in_state > 2.0
+            and e_now > e_peak * max(1.12, jump * 0.85)
+            and b_now > 0.85
         )
 
-        return bass_slam or energy_jump or local_contrast or flux_spike or soft_payoff
+        if self.state is Section.GROOVE:
+            return fast_rise
+
+        return fast_rise or bass_slam or soft_payoff
 
     def _update_build_progress(self, f: Features, dt: float) -> None:
         if self.state is Section.BUILDUP:
@@ -226,12 +214,25 @@ class SectionTracker:
             self.build_progress *= math.exp(-dt * 3.0)
 
 
-def _window_median(hist: deque[float], frame_rate: float) -> float:
-    """Median of the samples 0.7-1.3 seconds ago."""
+def _sample_ago(hist: deque[float], frame_rate: float, seconds: float) -> float:
+    """Value from about `seconds` ago (last sample if the buffer is short)."""
     n = len(hist)
-    start = n - int(1.3 * frame_rate)
-    stop = n - int(0.7 * frame_rate)
-    return statistics.median(islice(hist, max(start, 0), stop))
+    if n == 0:
+        return 0.0
+    back = max(0, min(n - 1, int(round(seconds * frame_rate))))
+    return hist[n - 1 - back]
+
+
+def _range_max(hist: deque[float], frame_rate: float, lo_s: float, hi_s: float) -> float:
+    """Max of samples from lo_s–hi_s ago (excludes the newest tail)."""
+    n = len(hist)
+    if n == 0:
+        return 0.0
+    start = n - 1 - max(0, int(round(hi_s * frame_rate)))
+    stop = n - 1 - max(0, int(round(lo_s * frame_rate)))
+    start = max(0, min(n - 1, start))
+    stop = max(start + 1, min(n, stop + 1))
+    return max(list(hist)[start:stop])
 
 
 def _accumulate(value: float, condition: bool, dt: float) -> float:

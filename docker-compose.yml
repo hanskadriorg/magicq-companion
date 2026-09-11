@@ -8,6 +8,6 @@ services:
     devices:
       - /dev/snd
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./config.toml:/app/config.toml
     command: python -m magicq_companion --ui
     restart: unless-stopped

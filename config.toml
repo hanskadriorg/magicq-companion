@@ -24,6 +24,9 @@ universe = 0
 fps = 40
 # sACN source priority (0–200). Higher wins if multiple sources share a universe.
 priority = 100
+# Dashboard output switch. Written when you toggle Output on/off so a
+# daytime reboot does not start sending again.
+enabled = true
 
 # Matter lights → MagicQ on the SAME interface, optionally a different universe/protocol.
 [matter]
@@ -41,6 +44,8 @@ blocksize = 512
 # Substring of the input device name ("" = system default input).
 # Run `python -m magicq_companion --list-devices` to see options.
 device = "pipewire"
+# Analyse left, right, or both (average). Use left for a mono card.
+input_channel = "left"
 
 # DMX channel assignments (1-based addresses within the universe).
 # Section channels are 255 while that section is active, 0 otherwise.
@@ -53,31 +58,19 @@ drop = 4
 build_progress = 5
 # Toggles 0↔255 on every detected kick (hard edges for MagicQ BPM input).
 beat_pulse = 6
-# Overall loudness relative to the recent average (128 = "normal" level).
-energy = 7
-# Kick-band (bass) envelope follower, like a smarter 63 Hz trigger.
-kick = 8
 # 255 for ~150 ms only at the instant DROP starts (cue / strobe / macro trigger).
 # Channel 4 stays high for the whole drop look; this one is the impact flash.
 drop_hit = 9
-# 0-255: kick still present but the ear focus has shifted to mid/high
-# (pads, leads, chords). Low during pure kick grooves and breakdowns.
-melody = 10
-# 255 pulse on every 4/4 quarter note (phase-locked grid). More regular than
-# beat_pulse (ch6): keeps ticking if a kick is missed. Best for chase sync.
+# 255 while a 4/4 kick grid is locked, 0 when it isn't.
 four_four = 11
-# Spectral centroid: low = dark/bass-heavy, high = bright/trebly (0-255).
-centroid = 12
-# (mid+high) / bass — how open/bright the mix is vs the kick (0-255).
-tilt = 13
-# Chase speed vs BPM from energy: 255=full, 128=½, 64=¼, 32=⅛ (0.25s fades).
+# Chase speed vs BPM from energy: 255=full, 128=½, 64=¼, 32=⅛ (no fades).
 bpm_rate = 14
 
-# Channel 14 (bpm_rate): energy → chase divisor within an allowed band.
+# Channel 14 (bpm_rate): energy → BPM divider within an allowed band.
 [bpm_rate]
 min = "eighth"
 max = "full"
-decay_seconds = 0
+decay_seconds = 3
 
 [detection]
 # Bass level (relative to its rolling average, 1.0 = average) below which
@@ -93,18 +86,39 @@ evidence_seconds = 2.0
 min_dwell_seconds = 6.0
 # How long the DROP section is held before returning to GROOVE.
 # Also adjustable live from the web UI ("Drop length").
-drop_hold_seconds = 16
+drop_hold_seconds = 10
 # A build-up that lasts this long without a drop falls back to GROOVE.
 build_timeout_seconds = 30.0
 # Expected build-up length in seconds (paces the build_progress ramp).
 expected_build_seconds = 12.0
-# Drop trigger: short-term energy jump ratio (now vs ~1s ago).
+# Drop trigger: energy now vs energy drop_rise_window seconds ago (ratio).
 drop_energy_jump = 1.35
+# Fast drop: energy_norm must rise by this much inside drop_rise_window.
+drop_rise_window = 0.5
+drop_rise = 0.40
+drop_min_bass = 0.70
+drop_min_state_seconds = 0.15
+drop_smooth_seconds = 0.08
+drop_from_groove = true
+drop_use_onset = true
 # Rolling baseline window in seconds (adapts to DJ gain changes).
 baseline_seconds = 45.0
-# 0 = groove/monotonous (harder builds+drops), 1 = aggressive (easier).
-# Also adjustable live from the web UI.
-intensity = 0.55
+# 0 = groove/monotonous (harder), 1 = aggressive (easier). Independent sliders.
+build_intensity = 0.55
+drop_intensity = 0.55
+# Seconds BUILDUP can sit below the build threshold before falling back to GROOVE.
+build_decay_seconds = 8.0
+# 4/4 lock (channel 11): higher intensity locks easier; smoothing delays on/off.
+four_four_intensity = 0.55
+four_four_smooth_seconds = 0.4
+# Breakdown: higher intensity enters sooner; beats is how long the kick must be gone.
+breakdown_intensity = 0.55
+breakdown_beats = 4.0
+# Arrangement style: auto | club | long_build | punchy | breakdown
+style = "auto"
+# Blackout DMX after this many seconds of hiss/silence (music resumes it).
+silence_gate = true
+silence_timeout_seconds = 600
 
 # Weights for the build score (normalized at runtime).
 # Slopes = rising tension; lift/divergence catch slow filter opens.
@@ -122,3 +136,10 @@ full_scale_onset_slope = 0.8
 full_scale_brightness_slope = 0.04
 full_scale_lift = 0.18
 full_scale_activity = 2.5
+
+# Dashboard options that also change what the Pi computes.
+[ui]
+# Spectrum bars. Off skips that work on the Pi (saves RAM/CPU).
+visualizer = true
+# auto = fill the pane, absolute = real dBFS, level = input loudness over time.
+visualizer_mode = "auto"

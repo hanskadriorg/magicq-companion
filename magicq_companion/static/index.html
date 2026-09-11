@@ -7,284 +7,520 @@
 <title>MagicQ Companion</title>
 <style>
   :root {
-    --bg: #0b0d10;
-    --panel: #14171c;
-    --panel-2: #1a1e25;
-    --text: #e8eaed;
-    --dim: #8a919e;
-    --groove: #3fa7ff;
-    --breakdown: #a78bfa;
-    --buildup: #ffb020;
-    --drop: #ff4757;
+    --bg: #000;
+    --panel: #3a3936;
+    --panel-2: #2a2927;
+    --text: #d2d0c8;
+    --dim: #8c8a82;
+    --groove: #4a5a6a;
+    --breakdown: #6a3d9a;
+    --buildup: #c47b00;
+    --drop: #c41e1e;
+    --face: #3a3936;
+    --title: #c8c6be;
+    --chrome: #3d4a58;
+    --chrome-dark: #2a3340;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: var(--bg);
+    background: #000;
     color: var(--text);
-    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-family: Tahoma, "MS Sans Serif", "Liberation Sans", sans-serif;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 24px 16px;
+    padding: 18px 12px 28px;
   }
   .wrap {
     width: 100%; max-width: 780px;
-    display: flex; flex-direction: column; gap: 14px;
+    display: flex; flex-direction: column; gap: 8px;
     transition: max-width .2s;
   }
 
   header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 0 4px; gap: 12px;
+    gap: 10px; padding: 3px 6px 3px 0;
+    background: linear-gradient(180deg, #4a5560 0%, #323a44 14%, #2a3340 86%, #1c2228 100%);
+    color: #c8c6be;
+    border: 1px solid #1a1e24;
+    box-shadow: inset 0 1px 0 #6a7380, 0 2px 4px rgba(0,0,0,.55);
   }
-  header h1 { font-size: 15px; font-weight: 600; letter-spacing: .04em; color: var(--dim); }
-  header .meta { font-size: 12px; color: var(--dim); text-align: right; line-height: 1.5; flex: 1; }
+  header h1 {
+    font-size: 15px; font-weight: 700; font-style: italic;
+    color: #d0cec6; letter-spacing: .01em;
+    background: linear-gradient(180deg, #4a5a48 0%, #354236 18%, #2a332a 100%);
+    padding: 5px 18px 5px 12px;
+    border-radius: 0 14px 14px 0;
+    box-shadow: inset 0 1px 0 #6a7a66, 1px 1px 2px rgba(0,0,0,.45);
+    text-shadow: 1px 1px 0 rgba(0,0,0,.45);
+    white-space: nowrap;
+  }
+  header .meta { font-size: 11px; color: #9aa0a8; text-align: right; line-height: 1.4; flex: 1; text-shadow: 1px 1px 0 #111; }
   header .hdr-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
-  header .stop, header .reboot, header .layout-btn {
-    background: transparent; color: var(--drop); border: 1px solid #5a2430;
-    border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 600;
-    cursor: pointer; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
+  header .stop, header .reboot {
+    font-family: inherit; font-size: 11px; font-weight: 700;
+    background: var(--face); color: var(--text);
+    border-top: 1px solid #6a6860; border-left: 1px solid #6a6860;
+    border-right: 1px solid #1a1918; border-bottom: 1px solid #1a1918;
+    border-radius: 0; padding: 4px 10px; cursor: pointer; white-space: nowrap;
   }
-  header .reboot, header .layout-btn { color: var(--dim); border-color: #333842; }
-  header .stop:hover { background: #2a1218; }
-  header .reboot:hover, header .layout-btn:hover { background: #1a1e25; color: var(--text); }
-  header .stop:disabled, header .reboot:disabled, header .layout-btn:disabled { opacity: .5; cursor: default; }
+  header .stop { color: #c07070; }
+  header .stop:active, header .reboot:active {
+    border-top: 1px solid #404040; border-left: 1px solid #404040;
+    border-right: 1px solid #fff; border-bottom: 1px solid #fff;
+  }
+  header .stop:disabled, header .reboot:disabled { opacity: .5; cursor: default; }
   .toggle {
-    display: flex; align-items: center; gap: 8px; cursor: pointer;
-    font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
-    color: var(--dim); user-select: none;
+    display: flex; align-items: center; gap: 5px; cursor: pointer;
+    font-size: 11px; font-weight: 700; color: #c8c6be; user-select: none;
+    text-shadow: 1px 1px 0 #111;
   }
   .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
   .toggle .knob {
-    width: 40px; height: 22px; border-radius: 999px; background: #333842;
-    position: relative; transition: background .2s; flex-shrink: 0;
+    width: 13px; height: 13px; border-radius: 0; background: #2a2927;
+    border-top: 1px solid #404040; border-left: 1px solid #404040;
+    border-right: 1px solid #fff; border-bottom: 1px solid #fff;
+    position: relative; flex-shrink: 0;
+    box-shadow: inset 1px 1px 0 #808080;
   }
   .toggle .knob::after {
-    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
-    border-radius: 50%; background: #c5c9d1; transition: transform .2s;
+    content: ""; position: absolute; inset: 0;
   }
-  .toggle input:checked + .knob { background: #276749; }
-  .toggle input:checked + .knob::after { transform: translateX(18px); background: #48bb78; }
-  .toggle.on { color: #48bb78; }
-  .toggle.off { color: var(--drop); }
+  .toggle input:checked + .knob::after {
+    content: "";
+    position: absolute; left: 2px; top: 0; width: 4px; height: 8px;
+    border-right: 2px solid #c8c6be; border-bottom: 2px solid #c8c6be;
+    transform: rotate(40deg);
+  }
+  .toggle.on { color: #c8c6be; }
+  .toggle.off { color: #a87878; }
   .hero.output-off .section-label,
   .hero.analyzer-off .section-label { color: var(--dim) !important; }
   .hero.output-off .glow,
   .hero.analyzer-off .glow { opacity: .06; }
+  .hero.viz-off .hero-pane-spark { display: none; }
 
-  .layout-bar {
-    background: var(--panel); border-radius: 16px; padding: 14px 18px;
-    display: none; gap: 12px; align-items: flex-end; flex-wrap: wrap;
-    border: 1px solid #2a3140;
+  .dock {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
   }
-  .layout-bar.open { display: flex; }
-  .layout-bar label {
-    font-size: 10px; color: var(--dim); letter-spacing: .1em;
-    text-transform: uppercase; display: flex; flex-direction: column; gap: 6px;
-  }
-  .layout-bar input[type="number"] {
-    background: var(--panel-2); border: 1px solid #262b33; color: var(--text);
-    border-radius: 8px; padding: 8px 10px; font-size: 14px; width: 72px;
-  }
-  .layout-bar .hint { font-size: 12px; color: var(--dim); flex: 1 1 180px; line-height: 1.4; }
-  .layout-bar button {
-    background: var(--groove); color: #08131e; font-weight: 600; border: none;
-    border-radius: 8px; padding: 10px 14px; font-size: 13px; cursor: pointer;
-  }
-  .layout-bar button.secondary {
-    background: var(--panel-2); color: var(--text); border: 1px solid #262b33;
-  }
-
-  .layout-grid {
-    display: grid;
-    gap: 14px;
+  .dock-row {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
     width: 100%;
     align-items: stretch;
   }
-  .layout-grid.editing {
-    min-height: 420px;
-    background-image:
-      linear-gradient(to right, #1f2430 1px, transparent 1px),
-      linear-gradient(to bottom, #1f2430 1px, transparent 1px);
-    background-size: calc(100% / var(--cols, 1)) 80px;
-    border: 1px dashed #333842;
-    border-radius: 16px;
-    padding: 10px;
-  }
-  .grid-cell {
-    min-height: 72px;
-    border: 1px dashed #2e3542;
-    border-radius: 12px;
-    background: rgba(255,255,255,.02);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; color: #5a6270; letter-spacing: .08em; text-transform: uppercase;
-    cursor: pointer; user-select: none;
-  }
-  .grid-cell:hover, .grid-cell.drop-target { border-color: var(--groove); color: var(--groove); }
+  .dock-row > .box { flex: 1 1 0; }
   .box {
     position: relative;
     min-width: 0;
     min-height: 0;
-    height: 100%;
+    height: auto;
     display: flex;
     flex-direction: column;
+    background: var(--face);
+    border: 3px solid #3d4a58;
+    border-radius: 8px 8px 2px 2px;
+    box-shadow: 2px 2px 6px rgba(0,0,0,.55);
+    overflow: hidden;
   }
-  .box.editing-selected {
-    outline: 2px solid var(--groove);
-    outline-offset: 2px;
+  .box.has-height { overflow: auto; }
+  .box.dragging { opacity: .45; }
+  .box.snap-top::after, .box.snap-bottom::after,
+  .box.snap-left::after, .box.snap-right::after {
+    content: ""; position: absolute; z-index: 6; pointer-events: none;
+    background: rgba(180, 160, 80, .28);
+    box-shadow: inset 0 0 0 2px #8a7a40;
   }
-  .panel.box, .hero.box { height: 100%; }
-  .panel.box { display: flex; flex-direction: column; }
-  .panel.box > *:not(.box-chrome) { min-height: 0; }
-  .panel.box .settings,
-  .panel.box .dmx,
-  .panel.box .log { flex: 1 1 auto; }
-  .box-chrome {
-    display: none;
-    position: absolute; top: 8px; right: 8px; z-index: 3;
-    gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end;
+  .box.snap-top::after { inset: 0 0 50% 0; }
+  .box.snap-bottom::after { inset: 50% 0 0 0; }
+  .box.snap-left::after { inset: 0 50% 0 0; }
+  .box.snap-right::after { inset: 0 0 0 50%; }
+  .win-bar {
+    display: flex; align-items: center; gap: 8px;
+    cursor: grab; user-select: none;
+    margin: 0;
+    padding: 3px 5px 4px 8px;
+    position: relative; z-index: 2;
+    background: linear-gradient(180deg, #4a5560 0%, #343d48 12%, #2c3540 55%, #222830 100%);
+    box-shadow: inset 0 1px 0 #6a7380;
   }
-  .editing .box-chrome { display: flex; }
-  .box-chrome select {
-    background: var(--panel-2); border: 1px solid #262b33; color: var(--text);
-    border-radius: 6px; padding: 4px 6px; font-size: 11px;
+  .win-bar:active { cursor: grabbing; }
+  .win-bar h2 {
+    font-size: 12px; font-weight: 700; color: #c8c6be;
+    letter-spacing: 0; text-transform: none; margin: 0; flex: 1;
+    text-shadow: 1px 1px 1px rgba(0,0,0,.55);
   }
-  .box-chrome .drag {
-    background: var(--panel-2); border: 1px solid #262b33; color: var(--dim);
-    border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: grab;
-    letter-spacing: .06em; text-transform: uppercase;
+  .win-bar .grip { display: none; }
+  .xp-btns {
+    width: 50px; height: 14px; flex-shrink: 0; pointer-events: none;
+    background:
+      linear-gradient(#4a5560, #2c3540) 0 0 / 14px 14px no-repeat,
+      linear-gradient(#4a5560, #2c3540) 18px 0 / 14px 14px no-repeat,
+      linear-gradient(#6a4040, #4a2828) 36px 0 / 14px 14px no-repeat;
+    border-radius: 2px;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.35);
+    position: relative;
+  }
+  .xp-btns::before, .xp-btns::after {
+    content: ""; position: absolute; top: 3px; width: 8px; height: 8px;
+  }
+  .xp-btns::before { left: 3px; border-bottom: 2px solid #fff; }
+  .xp-btns::after { left: 39px; background:
+    linear-gradient(45deg, transparent 40%, #fff 41%, #fff 59%, transparent 60%),
+    linear-gradient(-45deg, transparent 40%, #fff 41%, #fff 59%, transparent 60%);
+  }
+  .win-resize {
+    position: sticky; bottom: 0; z-index: 3;
+    height: 12px; margin: 4px 0 0;
+    cursor: ns-resize; touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--face);
+  }
+  .win-resize::after {
+    content: ""; width: 28px; height: 2px; background: #808080;
+    box-shadow: 0 3px 0 #808080;
   }
 
   .hero {
-    background: var(--panel);
-    border-radius: 16px;
-    padding: 34px 28px 30px;
+    background: var(--face);
+    border-radius: 8px 8px 2px 2px;
+    padding: 0 0 6px;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    gap: 0;
     position: relative;
     overflow: hidden;
   }
+  .hero.has-height .hero-pane-spark { flex: 1 1 auto; min-height: calc(var(--spark-h, 90px) + 52px); }
   .hero .glow {
     position: absolute; inset: 0;
-    background: radial-gradient(ellipse 60% 120% at 30% 50%, var(--glow-color, transparent) 0%, transparent 70%);
+    background: radial-gradient(ellipse 60% 120% at 18% 30%, var(--glow-color, transparent) 0%, transparent 70%);
     opacity: .16;
     transition: background .6s;
     pointer-events: none;
   }
+  .hero-stack {
+    position: relative; z-index: 1; display: flex; flex-direction: column;
+    flex: 1 1 auto; min-height: 0;
+    background: #111318; color: #e8eaed;
+    border-top: 1px solid #404040; border-left: 1px solid #404040;
+    border-right: 1px solid #fff; border-bottom: 1px solid #fff;
+    padding: 8px 10px;
+    margin: 6px 8px 0;
+  }
+  .hero-pane { position: relative; flex: 0 0 auto; }
+  .hero-pane-spark {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: calc(var(--spark-h, 90px) + 52px);
+  }
+  .pane-grip, .pane-split {
+    display: flex;
+    position: absolute; left: 0; right: 0; z-index: 2;
+    height: 12px;
+    align-items: center; justify-content: center;
+    touch-action: none; user-select: none;
+    opacity: .28;
+  }
+  .pane-grip:hover, .pane-split:hover { opacity: .9; }
+  .pane-grip { top: 0; cursor: grab; }
+  .pane-split { bottom: 0; cursor: ns-resize; }
+  .pane-grip:active { cursor: grabbing; }
+  .pane-grip::after, .pane-split::after {
+    content: ""; width: 40px; height: 3px; border-radius: 2px; background: #5a6270;
+  }
+  .hero-pane.drag-over { outline: 1px dashed var(--groove); outline-offset: -1px; border-radius: 8px; }
+  .hero-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 16px;
+    align-items: start;
+  }
+  .hero-copy { min-width: 0; }
   .section-label {
-    font-size: 54px;
+    font-size: 28px;
     font-weight: 800;
     letter-spacing: .06em;
+    line-height: 1.1;
     transition: color .3s;
   }
-  .section-sub { font-size: 13px; color: var(--dim); margin-top: 6px; }
+  .hero-stack .section-label, .hero-stack .bpm-value { color: #e8eaed; }
+  .hero-stack .section-sub, .hero-stack .bpm-label { color: #9aa3b2; }
+  .hero-stack .beat-dot { background: #e8eaed; }
+  .section-sub { font-size: 12px; color: var(--dim); margin-top: 4px; }
+  .section-style { font-size: 11px; color: #8a919e; margin-top: 4px; }
+  .evidence { display: grid; gap: 3px; margin-top: 8px; }
+  .ev {
+    display: grid; grid-template-columns: 72px 1fr 58px; gap: 6px;
+    align-items: center;
+  }
+  .ev span { font-size: 10px; color: #9aa3b2; letter-spacing: .04em; text-transform: uppercase; }
+  .ev .track { background: #1a1e25; border: 1px solid #404040; height: 8px; }
+  .ev .fill { height: 100%; width: 0%; }
+  .ev .val { font-size: 10px; color: #9aa3b2; text-align: right; font-variant-numeric: tabular-nums; }
   .bpm-box { text-align: right; }
-  .bpm-value { font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .bpm-label { font-size: 12px; color: var(--dim); letter-spacing: .1em; }
+  .bpm-value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .bpm-label { font-size: 11px; color: var(--dim); letter-spacing: .1em; margin-top: 2px; }
   .beat-dot {
-    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-    background: var(--text); margin-left: 10px; opacity: .1;
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--text); margin-left: 8px; opacity: .1;
+  }
+  .hero-spark {
+    position: relative;
+    height: var(--spark-h, 90px);
+    flex: 0 0 var(--spark-h, 90px);
+    min-height: var(--spark-h, 90px);
+    flex-shrink: 0;
+  }
+  .hero.has-height .hero-spark {
+    flex: 1 1 auto;
+    min-height: var(--spark-h, 90px);
+    flex-shrink: 0;
+  }
+  .hero-spark canvas { width: 100%; height: 100%; display: block; }
+  .hero-meters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 20px;
+    row-gap: 2px;
+    min-height: var(--meters-h, 0px);
+  }
+  @media (max-width: 640px) {
+    .hero-meters { grid-template-columns: 1fr; }
   }
 
-  .panel { background: var(--panel); border-radius: 16px; padding: 20px 24px; }
+  .panel { background: var(--face); border-radius: 8px 8px 2px 2px; padding: 0 0 8px; }
+  .panel > :not(.win-bar):not(.win-resize) { margin-left: 10px; margin-right: 10px; }
 
-  .meter { display: grid; grid-template-columns: 74px 1fr 52px; gap: 14px; align-items: center; padding: 7px 0; }
-  .meter .name { font-size: 12px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
-  .meter .track { background: var(--panel-2); border-radius: 6px; height: 14px; overflow: hidden; }
+  .meter { display: grid; grid-template-columns: 62px 1fr 40px; gap: 8px; align-items: center; padding: 2px 0; }
+  .meter .name { font-size: 10px; color: #9aa3b2; letter-spacing: .08em; text-transform: uppercase; }
+  .meter .track { background: #1a1e25; border-radius: 0; height: 10px; overflow: hidden; border: 1px solid #404040; }
   .meter .fill {
-    height: 100%; border-radius: 6px; width: 0%;
+    height: 100%; border-radius: 5px; width: 0%;
     transition: width 90ms linear;
   }
-  .meter .val { font-size: 13px; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+  .meter .val { font-size: 11px; color: #9aa3b2; text-align: right; font-variant-numeric: tabular-nums; }
   .fill.energy { background: linear-gradient(90deg, #2b6cb0, #3fa7ff); }
   .fill.bass   { background: linear-gradient(90deg, #276749, #48bb78); }
   .fill.build  { background: linear-gradient(90deg, #975a16, #ffb020); }
   .fill.ramp   { background: linear-gradient(90deg, #9b2c2c, #ff4757); }
   .fill.melody { background: linear-gradient(90deg, #6b46c1, #a78bfa); }
-  .fill.centroid { background: linear-gradient(90deg, #1a365d, #63b3ed); }
-  .fill.tilt { background: linear-gradient(90deg, #744210, #f6ad55); }
 
   canvas { width: 100%; height: 90px; display: block; }
 
+  /* Input level pane: absolute dBFS, so gain problems are visible. */
+  .hero-input { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 2px; }
+  .input-row { display: grid; grid-template-columns: 62px 1fr 86px; gap: 8px; align-items: center; }
+  .input-row .name { font-size: 10px; color: #9aa3b2; letter-spacing: .08em; text-transform: uppercase; }
+  .input-scale {
+    position: relative; height: 20px; background: #14171c;
+    border: 1px solid #404040; overflow: hidden;
+  }
+  .input-scale .bar {
+    position: absolute; left: 0; top: 0; height: 9px; width: 0%;
+    background: linear-gradient(90deg, #276749 0%, #48bb78 55%, #ffb020 82%, #ff4757 100%);
+    transition: width 60ms linear;
+  }
+  .input-scale .bar.peak {
+    top: 11px; height: 7px; opacity: .55;
+    background: linear-gradient(90deg, #2b6cb0, #63b3ed);
+  }
+  .input-scale .floor {
+    position: absolute; top: 0; bottom: 0; width: 0;
+    border-left: 2px dashed #ffb020; left: 0;
+  }
+  .input-scale .floor::after {
+    content: "floor"; position: absolute; top: 1px; left: 3px;
+    font-size: 9px; color: #ffb020; letter-spacing: .04em;
+  }
+  .input-verdict { font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; color: #9aa3b2; }
+  .input-verdict.ok { color: #7a9a70; }
+  .input-verdict.warn { color: #d0a860; }
+  .input-verdict.err { color: #d07070; }
+  .input-ticks {
+    display: flex; justify-content: space-between;
+    font-size: 9px; color: #5a6270; letter-spacing: .04em;
+  }
+  .viz-bar {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 2px 0 4px; font-size: 11px; color: #9aa3b2;
+  }
+  .viz-bar select, .viz-bar input[type="range"] {
+    background: #14171c; color: var(--text); border: 1px solid #404040;
+    font: inherit; padding: 2px 4px;
+  }
+  .viz-bar input[type="range"] { width: 130px; padding: 0; accent-color: #ffb020; }
+  .viz-bar .viz-val { font-variant-numeric: tabular-nums; min-width: 58px; }
+
+  /* Section log */
+  .seclog { max-height: 100%; overflow: auto; font-variant-numeric: tabular-nums; }
+  .seclog table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .seclog th {
+    text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    color: #8c8a82; font-weight: 500; padding: 4px 6px; position: sticky; top: 0;
+    background: var(--face); border-bottom: 1px solid #2a2927;
+  }
+  .seclog td { padding: 3px 6px; border-bottom: 1px solid #22211f; color: #c8ccd4; }
+  .seclog td.sec { font-weight: 600; }
+  .seclog .empty { font-size: 12px; color: var(--dim); padding: 8px 6px; }
+
   .dmx { display: flex; gap: 8px; flex-wrap: wrap; }
   .chip {
-    background: var(--panel-2); border-radius: 8px; padding: 8px 0;
-    width: 76px; text-align: center;
+    background: #2a2927; border-radius: 0; padding: 6px 0; width: 76px; text-align: center;
+    border-top: 1px solid #5a5850; border-left: 1px solid #5a5850;
+    border-right: 1px solid #1a1918; border-bottom: 1px solid #1a1918;
   }
-  .chip .ch { font-size: 10px; color: var(--dim); letter-spacing: .05em; }
+  .chip .ch { font-size: 10px; color: #8c8a82; letter-spacing: .05em; }
   .chip .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
 
-  .log { font-size: 13px; color: var(--dim); line-height: 1.9; font-variant-numeric: tabular-nums; }
-  .log b { color: var(--text); font-weight: 600; }
-  .panel h2 {
-    font-size: 11px; font-weight: 600; color: var(--dim);
-    letter-spacing: .12em; text-transform: uppercase; margin-bottom: 12px;
+  .log { font-size: 13px; color: #202020; line-height: 1.8; font-variant-numeric: tabular-nums; }
+  .log b { color: #000; font-weight: 700; }
+  .panel h2, .hero h2 {
+    font-size: 12px; font-weight: 700; color: #c8c6be;
+    letter-spacing: 0; text-transform: none; margin-bottom: 0;
   }
   .offline {
     text-align: center; font-size: 13px; color: var(--drop);
     padding: 6px; display: none;
   }
 
-  .settings { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .settings { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
   .settings label {
-    font-size: 10px; color: var(--dim); letter-spacing: .1em;
-    text-transform: uppercase; display: flex; flex-direction: column; gap: 6px;
+    font-size: 11px; color: var(--text); letter-spacing: 0;
+    text-transform: none; display: flex; flex-direction: column; gap: 4px;
     flex: 1 1 160px;
   }
+  .settings [hidden] { display: none !important; }
   .settings select, .settings input {
-    background: var(--panel-2); border: 1px solid #262b33; color: var(--text);
-    border-radius: 8px; padding: 9px 10px; font-size: 14px; font-family: inherit;
+    background: #2a2927; border: 1px solid #5a5850; color: var(--text);
+    border-radius: 0; padding: 4px 6px; font-size: 13px; font-family: inherit;
     width: 100%;
   }
   .settings select { min-width: 200px; }
   .settings input[type="text"] { min-width: 140px; }
   .settings input[type="number"] { min-width: 80px; max-width: 110px; }
-  .settings select:focus, .settings input:focus { outline: 1px solid var(--groove); }
-  .settings .actions { display: flex; gap: 8px; align-items: flex-end; }
+  .settings select:focus, .settings input:focus { outline: 1px dotted #8c8a82; }
+  .settings .actions { display: flex; gap: 6px; align-items: flex-end; }
   .settings button {
-    background: var(--groove); color: #08131e; font-weight: 600; border: none;
-    border-radius: 8px; padding: 10px 18px; font-size: 14px; cursor: pointer;
-    white-space: nowrap;
+    background: var(--face); color: var(--text); font-weight: 700; font-family: inherit;
+    border-top: 1px solid #6a6860; border-left: 1px solid #6a6860;
+    border-right: 1px solid #1a1918; border-bottom: 1px solid #1a1918;
+    border-radius: 0; padding: 5px 14px; font-size: 12px; cursor: pointer;
+    white-space: nowrap; box-shadow: 0 0 0 1px #111;
   }
-  .settings button.secondary {
-    background: var(--panel-2); color: var(--text); border: 1px solid #262b33;
+  .settings button.secondary { background: var(--face); color: var(--text); }
+  .settings button:active {
+    border-top: 1px solid #404040; border-left: 1px solid #404040;
+    border-right: 1px solid #fff; border-bottom: 1px solid #fff;
   }
   .settings button:disabled { opacity: .5; cursor: default; }
-  .settings-note { font-size: 12px; color: var(--dim); margin-top: 10px; min-height: 16px; }
-  .settings-note.err { color: var(--drop); }
-  .settings-note.ok { color: #48bb78; }
-  .settings-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid #262b33; }
+  .settings-note { font-size: 12px; color: var(--dim); margin-top: 8px; min-height: 16px; }
+  .settings-note.err { color: #c07070; }
+  .settings-note.ok { color: #7a9a70; }
+  .settings-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid #2a2927; }
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; z-index: 30;
+    background: rgba(0,0,0,.65); align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--face); border: 3px solid #3d4a58; border-radius: 8px 8px 2px 2px;
+    padding: 0 12px 12px; width: min(540px, 100%); max-height: 90vh; overflow: auto;
+    box-shadow: 3px 3px 8px rgba(0,0,40,.4);
+  }
+  .modal h3 {
+    font-size: 12px; font-weight: 700; margin: 0 -12px 10px;
+    padding: 4px 10px;
+    background: linear-gradient(180deg, #4a5560 0%, #2c3540 100%);
+    color: #c8c6be; text-shadow: 1px 1px 1px rgba(0,0,0,.55);
+  }
+  .modal .hint { font-size: 12px; color: var(--dim); line-height: 1.45; margin-bottom: 12px; }
+  .modal .settings { margin-bottom: 8px; }
+  .settings .check-row, .modal .check-row {
+    flex: 1 1 220px; display: flex; flex-direction: row; align-items: center;
+    gap: 10px; padding-top: 14px;
+  }
+  .settings .check-row input, .modal .check-row input { width: auto; min-width: 0; accent-color: #4a5a6a; }
+  .settings .check-row span, .modal .check-row span { font-size: 12px; color: var(--text); letter-spacing: 0; text-transform: none; }
   .settings label.slider-label { flex: 1 1 220px; }
   .settings input[type="range"] {
-    -webkit-appearance: none; appearance: none; height: 6px; padding: 0;
-    background: var(--panel-2); border: 1px solid #262b33; border-radius: 999px;
+    -webkit-appearance: none; appearance: none; height: 4px; padding: 0;
+    background: #2a2927; border: 1px solid #5a5850; border-radius: 0;
     outline: none; min-width: 160px;
   }
   .settings input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none; width: 16px; height: 16px;
-    border-radius: 50%; background: var(--groove); cursor: pointer;
+    -webkit-appearance: none; appearance: none; width: 12px; height: 20px;
+    border-radius: 0; background: var(--face); cursor: pointer;
+    border-top: 1px solid #fff; border-left: 1px solid #fff;
+    border-right: 1px solid #404040; border-bottom: 1px solid #404040;
   }
   .settings .slider-val {
-    font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums;
+    font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums;
     letter-spacing: 0; text-transform: none; margin-top: 2px;
   }
+  .field-help {
+    font-size: 11px; color: var(--dim); letter-spacing: 0;
+    text-transform: none; font-weight: 400; line-height: 1.35;
+    margin: -2px 0 2px;
+  }
+  .modal .check-row { flex-wrap: wrap; }
+  .modal .check-row .field-help { flex: 1 1 100%; margin: 0 0 0 26px; }
+  .modal .settings { flex-direction: column; align-items: stretch; }
+  .modal .settings label { flex: 0 0 auto; }
+  .dual-label { flex: 1 1 280px; }
+  .dual-range {
+    position: relative;
+    height: 44px;
+    width: 100%;
+    min-width: 180px;
+    margin-top: 4px;
+  }
+  .dual-range .dual-rail {
+    position: absolute; left: 0; right: 0; top: 10px;
+    height: 4px; background: #2a2927; border: 1px solid #5a5850;
+    pointer-events: none;
+  }
+  .dual-range .dual-fill {
+    position: absolute; top: 10px; height: 4px;
+    background: #5a6a78; pointer-events: none;
+  }
+  .dual-range input[type="range"] {
+    position: absolute; left: 0; top: 2px;
+    width: 100%; height: 22px; margin: 0; min-width: 0;
+    background: transparent; border: none;
+    pointer-events: none; z-index: 2;
+  }
+  .dual-range input[type="range"]::-webkit-slider-thumb { pointer-events: auto; z-index: 3; }
+  .dual-range input[type="range"]::-moz-range-thumb { pointer-events: auto; }
+  .dual-range input[type="range"]::-moz-range-track { background: transparent; border: none; }
+  .dual-range #rngBpmHi { z-index: 3; }
+  .dual-ticks {
+    position: absolute; left: 0; right: 0; top: 26px;
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--dim); pointer-events: none;
+  }
   .seg-label {
-    flex: 1 1 100%; font-size: 11px; font-weight: 600; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--dim); margin: 4px 0 2px;
+    flex: 1 1 100%; font-size: 11px; font-weight: 700; letter-spacing: 0;
+    text-transform: none; color: var(--text); margin: 4px 0 2px;
   }
   .matter-form, .matter-device { display: flex; flex-wrap: wrap; gap: 10px 14px; }
   .matter-device {
-    width: 100%; background: var(--panel-2); border: 1px solid #262b33;
-    border-radius: 10px; padding: 12px;
+    width: 100%; background: #2a2927; border: 1px solid #5a5850;
+    border-radius: 0; padding: 10px;
   }
-  .matter-device h3 { font-size: 14px; font-weight: 600; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .matter-device h3 { font-size: 13px; font-weight: 700; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--text); }
   .matter-device .meta { font-size: 12px; color: var(--dim); margin-top: 6px; }
-  .matter-device img { width: 160px; height: 160px; background: #fff; border-radius: 8px; }
-  .badge { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; border: 1px solid #333842; border-radius: 999px; padding: 2px 8px; color: var(--dim); }
-  .badge.ok { color: #48bb78; border-color: #2a5a3c; }
-  .badge.warn { color: var(--buildup); border-color: #5a4420; }
+  .matter-device img { width: 160px; height: 160px; background: #fff; border-radius: 0; border: 1px solid #5a5850; }
+  .badge { font-size: 10px; letter-spacing: 0; text-transform: none; border: 1px solid #5a5850; border-radius: 0; padding: 1px 6px; color: var(--dim); background: #2a2927; }
+  .badge.ok { color: #7a9a70; border-color: #4a5a44; }
+  .badge.warn { color: #b09060; border-color: #6a5a38; }
   .matter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 </style>
 </head>
@@ -304,38 +540,31 @@
         <span class="knob"></span>
         <span id="lblEnableText">Output on</span>
       </label>
-      <button type="button" class="layout-btn" id="btnEditLayout" title="Rearrange dashboard panels">Edit layout</button>
+      <label class="toggle on" id="lblViz" title="Stop computing the spectrum on the Pi (saves RAM)">
+        <input type="checkbox" id="chkViz" checked>
+        <span class="knob"></span>
+        <span id="lblVizText">Visualizer on</span>
+      </label>
       <button type="button" class="reboot" id="btnReboot" title="Reboot this machine (Raspberry Pi)">Reboot</button>
       <button type="button" class="stop" id="btnStop" title="Stop the server and free the port">Stop server</button>
     </div>
   </header>
 
-  <div class="layout-bar" id="layoutBar">
-    <label>Columns
-      <input type="number" id="inCols" min="1" max="4" step="1" value="1">
-    </label>
-    <label>Rows
-      <input type="number" id="inRows" min="1" max="8" step="1" value="6">
-    </label>
-    <div class="hint">Select a panel, then click a grid cell. Use W/H span so a tall left panel matches two stacked panels on the right (no dead space).</div>
-    <button type="button" class="secondary" id="btnLayoutReset">Reset</button>
-    <button type="button" class="secondary" id="btnLayoutCancel">Cancel</button>
-    <button type="button" id="btnLayoutSave">Save to Pi</button>
-  </div>
-
-  <div class="layout-grid" id="layoutGrid">
+  <div class="dock" id="layoutGrid">
     <div class="panel box" data-box="settings" id="box-settings">
-      <div class="box-chrome">
-        <select class="span-select" title="Width span (columns)"></select>
-        <select class="row-span-select" title="Height span (rows)"></select>
-        <span class="drag" draggable="true">Move</span>
-      </div>
-      <h2>Settings</h2>
+      <div class="win-bar" draggable="true"><h2>Settings</h2><span class="xp-btns" aria-hidden="true"></span></div>
       <div class="settings">
         <div class="seg-label">Shared network</div>
         <label>Audio input
           <select id="selDevice">
             <option value="">Loading devices&hellip;</option>
+          </select>
+        </label>
+        <label>Channels
+          <select id="selInputChannel">
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+            <option value="both">Both (average)</option>
           </select>
         </label>
         <label>Network interface
@@ -372,6 +601,134 @@
         </label>
       </div>
       <div class="settings settings-row">
+        <div class="actions">
+          <button type="button" class="secondary" id="btnBuildSettings" title="How a build-up is detected and held">Build settings…</button>
+          <button type="button" class="secondary" id="btnDropSettings" title="How a drop is detected and held">Drop settings…</button>
+          <button type="button" class="secondary" id="btnBreakdownSettings" title="How a breakdown is detected">Breakdown settings…</button>
+          <button type="button" class="secondary" id="btnFourFourSettings" title="How the 4/4 lock on channel 11 is detected">4/4 settings…</button>
+        </div>
+        <label>Style
+          <select id="selStyle">
+            <option value="auto">Auto (from BPM / kick)</option>
+            <option value="club">4/4 club</option>
+            <option value="long_build">Long build</option>
+            <option value="punchy">Punchy</option>
+            <option value="breakdown">Breakdown-first</option>
+          </select>
+        </label>
+        <label class="check-row" style="flex:1 1 220px;padding-top:14px">
+          <input type="checkbox" id="chkSilenceGate" checked>
+          <span>Pause output if no music for 10 min</span>
+        </label>
+        <label class="slider-label dual-label">BPM divider
+          <span class="field-help">Lower knob is the quiet floor; upper knob is the loud ceiling (1/8 … 1/1 of the chase).</span>
+          <div class="dual-range" id="bpmDivider">
+            <div class="dual-rail"><div class="dual-fill" id="bpmDividerFill"></div></div>
+            <input type="range" id="rngBpmLo" min="0" max="3" step="1" value="0" aria-label="BPM divider lower floor">
+            <input type="range" id="rngBpmHi" min="0" max="3" step="1" value="3" aria-label="BPM divider upper floor">
+            <div class="dual-ticks"><span>1/8</span><span>1/4</span><span>1/2</span><span>1/1</span></div>
+          </div>
+          <span class="slider-val" id="lblBpmDivider">1/8 – 1/1</span>
+        </label>
+        <label class="slider-label">BPM divider decay
+          <span class="field-help">Hold a faster divider this long before stepping down when energy falls.</span>
+          <input type="range" id="rngBpmDecay" min="0" max="30" step="0.5" value="0">
+          <span class="slider-val" id="lblBpmDecay">0 s</span>
+        </label>
+        <div class="actions">
+          <button type="button" class="secondary" id="btnRefresh" title="Rescan audio devices">Refresh</button>
+          <button type="button" id="btnApply">Apply</button>
+        </div>
+      </div>
+      <div class="settings-note" id="settingsNote">Loading settings&hellip;</div>
+    </div>
+
+    <div class="hero box" data-box="hero" id="box-hero">
+      <div class="win-bar" draggable="true"><h2>Live</h2><span class="xp-btns" aria-hidden="true"></span></div>
+      <div class="glow" id="glow"></div>
+      <div class="hero-stack" id="heroStack">
+        <section class="hero-pane" data-pane="head">
+          <div class="pane-grip" draggable="true" title="Drag to reorder"></div>
+          <div class="hero-head">
+            <div class="hero-copy">
+              <div class="section-label" id="section">&mdash;</div>
+              <div class="section-sub" id="sectionSub"></div>
+              <div class="section-style" id="styleHint"></div>
+              <div class="evidence" id="evidenceRow">
+                <div class="ev"><span>Kick gone</span><div class="track"><div class="fill bass" id="mEvKick"></div></div><div class="val" id="vEvKick">&ndash;</div></div>
+                <div class="ev"><span>Build ev</span><div class="track"><div class="fill build" id="mEvBuild"></div></div><div class="val" id="vEvBuild">&ndash;</div></div>
+                <div class="ev"><span>Fizzle</span><div class="track"><div class="fill ramp" id="mEvFizzle"></div></div><div class="val" id="vEvFizzle">&ndash;</div></div>
+              </div>
+            </div>
+            <div class="bpm-box">
+              <div class="bpm-value"><span id="bpm">&mdash;</span><span class="beat-dot" id="beatDot"></span></div>
+              <div class="bpm-label">BPM</div>
+            </div>
+          </div>
+        </section>
+        <section class="hero-pane" data-pane="input">
+          <div class="pane-grip" draggable="true" title="Drag to reorder"></div>
+          <div class="hero-input">
+            <div class="input-row">
+              <div class="name">Input</div>
+              <div class="input-scale" id="inputScale">
+                <div class="bar" id="inputRms"></div>
+                <div class="bar peak" id="inputPeak"></div>
+                <div class="floor" id="inputFloor"></div>
+              </div>
+              <div class="input-verdict" id="inputVerdict">&ndash;</div>
+            </div>
+            <div class="input-ticks">
+              <span>-90</span><span>-70</span><span>-50</span><span>-30</span><span>-12</span><span>0 dBFS</span>
+            </div>
+          </div>
+        </section>
+        <section class="hero-pane hero-pane-spark" data-pane="spark">
+          <div class="pane-grip" draggable="true" title="Drag to reorder"></div>
+          <div class="viz-bar">
+            <label>View
+              <select id="selVizMode" title="How the spectrum is scaled">
+                <option value="auto">Auto range</option>
+                <option value="absolute">Absolute dBFS</option>
+                <option value="level">Input level history</option>
+              </select>
+            </label>
+            <label id="lblVizFloor">Noise floor
+              <input type="range" id="rngNoiseFloor" min="-90" max="-20" step="1" value="-55">
+            </label>
+            <span class="viz-val" id="vNoiseFloor">-55 dBFS</span>
+          </div>
+          <div class="hero-spark">
+            <canvas id="spark" width="1400" height="180"></canvas>
+          </div>
+          <div class="pane-split" data-resize="spark" title="Drag to resize spectrum"></div>
+        </section>
+        <section class="hero-pane" data-pane="meters">
+          <div class="pane-grip" draggable="true" title="Drag to reorder"></div>
+          <div class="hero-meters">
+            <div class="meter"><div class="name">Build</div><div class="track"><div class="fill build" id="mBuild"></div></div><div class="val" id="vBuild">&ndash;</div></div>
+            <div class="meter"><div class="name">Music</div><div class="track"><div class="fill bass" id="mMusic"></div></div><div class="val" id="vMusic">&ndash;</div></div>
+            <div class="meter"><div class="name">Divider</div><div class="track"><div class="fill ramp" id="mBpmRate"></div></div><div class="val" id="vBpmRate">&ndash;</div></div>
+            <div class="meter"><div class="name">Ramp</div><div class="track"><div class="fill ramp" id="mRamp"></div></div><div class="val" id="vRamp">&ndash;</div></div>
+          </div>
+          <div class="pane-split" data-resize="meters" title="Drag to resize levels"></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="panel box" data-box="dmx" id="box-dmx">
+      <div class="win-bar" draggable="true"><h2>DMX output</h2><span class="xp-btns" aria-hidden="true"></span></div>
+      <div class="dmx" id="dmx"></div>
+    </div>
+
+    <div class="panel box" data-box="log" id="box-log">
+      <div class="win-bar" draggable="true"><h2>Section log</h2><span class="xp-btns" aria-hidden="true"></span></div>
+      <div class="seclog" id="seclog"><div class="empty">Waiting for the first section change&hellip;</div></div>
+    </div>
+
+    <div class="panel box" data-box="matter" id="box-matter">
+      <div class="win-bar" draggable="true"><h2>Matter setup</h2><span class="xp-btns" aria-hidden="true"></span></div>
+      <div class="settings">
         <div class="seg-label">Matter → MagicQ</div>
         <label>Protocol
           <select id="selMatterProtocol">
@@ -400,125 +757,30 @@
             <option value="0">Off</option>
           </select>
         </label>
-      </div>
-      <div class="settings settings-row">
-        <label class="slider-label">Build / drop intensity
-          <input type="range" id="rngIntensity" min="0" max="100" step="1" value="55">
-          <span class="slider-val" id="lblIntensity">55% — balanced</span>
-        </label>
-        <label class="slider-label">Drop length
-          <input type="range" id="rngDropHold" min="2" max="60" step="1" value="16">
-          <span class="slider-val" id="lblDropHold">16 s</span>
-        </label>
-        <label>Ch 14 rate from (quiet)
-          <select id="selBpmMin">
-            <option value="eighth">1/8 (32)</option>
-            <option value="quarter">1/4 (64)</option>
-            <option value="half">1/2 (128)</option>
-            <option value="full">1/1 (255)</option>
-          </select>
-        </label>
-        <label>Ch 14 rate to (loud)
-          <select id="selBpmMax">
-            <option value="eighth">1/8 (32)</option>
-            <option value="quarter">1/4 (64)</option>
-            <option value="half">1/2 (128)</option>
-            <option value="full" selected>1/1 (255)</option>
-          </select>
-        </label>
-        <label class="slider-label">Ch 14 decay (hold before step down)
-          <input type="range" id="rngBpmDecay" min="0" max="30" step="0.5" value="0">
-          <span class="slider-val" id="lblBpmDecay">0 s</span>
-        </label>
         <div class="actions">
-          <button type="button" class="secondary" id="btnRefresh" title="Rescan audio devices">Refresh</button>
-          <button type="button" id="btnApply">Apply</button>
+          <button type="button" id="btnMatterApply">Apply</button>
         </div>
       </div>
-      <div class="settings-note" id="settingsNote">Loading settings&hellip;</div>
-    </div>
-
-    <div class="hero box" data-box="hero" id="box-hero">
-      <div class="box-chrome">
-        <select class="span-select" title="Width span (columns)"></select>
-        <select class="row-span-select" title="Height span (rows)"></select>
-        <span class="drag" draggable="true">Move</span>
+      <div class="settings-note" id="matterLanNote">
+        Matter only works while a controller is on this LAN. If the phone leaves Wi‑Fi,
+        it loses the nodes unless a hub that stays here (SMART+ hub, Apple TV, Home Assistant, Google Nest)
+        is in the same fabric — the app then talks to the hub over mobile data.
+        Add a <b>Companion output</b> node below to switch this unit’s Art‑Net/sACN from the app
+        (same as the header Output toggle).
       </div>
-      <div class="glow" id="glow"></div>
-      <div>
-        <div class="section-label" id="section">&mdash;</div>
-        <div class="section-sub" id="sectionSub"></div>
-      </div>
-      <div class="bpm-box">
-        <div class="bpm-value"><span id="bpm">&mdash;</span><span class="beat-dot" id="beatDot"></span></div>
-        <div class="bpm-label">BPM</div>
-      </div>
-    </div>
-
-    <div class="panel box" data-box="meters" id="box-meters">
-      <div class="box-chrome">
-        <select class="span-select" title="Width span (columns)"></select>
-        <select class="row-span-select" title="Height span (rows)"></select>
-        <span class="drag" draggable="true">Move</span>
-      </div>
-      <div class="meter"><div class="name">Energy</div><div class="track"><div class="fill energy" id="mEnergy"></div></div><div class="val" id="vEnergy">&ndash;</div></div>
-      <div class="meter"><div class="name">Kick</div><div class="track"><div class="fill bass" id="mBass"></div></div><div class="val" id="vBass">&ndash;</div></div>
-      <div class="meter"><div class="name">Build</div><div class="track"><div class="fill build" id="mBuild"></div></div><div class="val" id="vBuild">&ndash;</div></div>
-      <div class="meter"><div class="name">Melody</div><div class="track"><div class="fill melody" id="mMelody"></div></div><div class="val" id="vMelody">&ndash;</div></div>
-      <div class="meter"><div class="name">Centroid</div><div class="track"><div class="fill centroid" id="mCentroid"></div></div><div class="val" id="vCentroid">&ndash;</div></div>
-      <div class="meter"><div class="name">Tilt</div><div class="track"><div class="fill tilt" id="mTilt"></div></div><div class="val" id="vTilt">&ndash;</div></div>
-      <div class="meter"><div class="name">BPM rate</div><div class="track"><div class="fill ramp" id="mBpmRate"></div></div><div class="val" id="vBpmRate">&ndash;</div></div>
-      <div class="meter"><div class="name">Ramp</div><div class="track"><div class="fill ramp" id="mRamp"></div></div><div class="val" id="vRamp">&ndash;</div></div>
-    </div>
-
-    <div class="panel box" data-box="spark" id="box-spark">
-      <div class="box-chrome">
-        <select class="span-select" title="Width span (columns)"></select>
-        <select class="row-span-select" title="Height span (rows)"></select>
-        <span class="drag" draggable="true">Move</span>
-      </div>
-      <h2>Energy &mdash; last 60 s</h2>
-      <canvas id="spark" width="1400" height="180"></canvas>
-    </div>
-
-    <div class="panel box" data-box="dmx" id="box-dmx">
-      <div class="box-chrome">
-        <select class="span-select" title="Width span (columns)"></select>
-        <select class="row-span-select" title="Height span (rows)"></select>
-        <span class="drag" draggable="true">Move</span>
-      </div>
-      <h2>DMX output</h2>
-      <div class="dmx" id="dmx"></div>
-    </div>
-
-    <div class="panel box" data-box="log" id="box-log">
-      <div class="box-chrome">
-        <select class="span-select" title="Width span (columns)"></select>
-        <select class="row-span-select" title="Height span (rows)"></select>
-        <span class="drag" draggable="true">Move</span>
-      </div>
-      <h2>Section log</h2>
-      <div class="log" id="log">&mdash;</div>
-    </div>
-
-    <div class="panel box" data-box="matter" id="box-matter">
-      <div class="box-chrome">
-        <select class="span-select" title="Width span (columns)"></select>
-        <select class="row-span-select" title="Height span (rows)"></select>
-        <span class="drag" draggable="true">Move</span>
-      </div>
-      <h2>Matter devices</h2>
-      <form class="settings matter-form" id="matterCreate">
+      <form class="settings matter-form settings-row" id="matterCreate">
         <label>Type
           <select id="matterType">
-            <option value="onoff">On / Off</option>
-            <option value="rgb">On / Off + RGB</option>
+            <option value="onoff">Switch</option>
+            <option value="dimmer">Dimmer</option>
+            <option value="rgb">RGB fixture</option>
+            <option value="output">Companion output</option>
           </select>
         </label>
         <label style="flex:2">Name
           <input id="matterName" maxlength="64" placeholder="House lights" required>
         </label>
-        <label id="lblMatterCh">DMX channel
+        <label id="lblMatterCh"><span id="lblMatterChText">DMX channel</span>
           <input id="matterChannel" type="number" min="1" max="512" value="1">
         </label>
         <span id="rgbMatterChannels" hidden>
@@ -539,42 +801,214 @@
   <div class="offline" id="offline">source stopped or connection lost &mdash; retrying&hellip;</div>
 </div>
 
+<div class="modal-backdrop" id="buildSettingsModal">
+  <div class="modal" role="dialog" aria-labelledby="buildSettingsTitle">
+    <h3 id="buildSettingsTitle">Build settings</h3>
+    <p class="hint">
+      Intensity is how easily a rising mix becomes BUILDUP.
+      Decay is how long BUILDUP hangs on after that tension dips — raise it if builds cut out too early.
+    </p>
+    <div class="settings">
+      <label class="slider-label">Build intensity
+        <span class="field-help">Higher enters BUILDUP on weaker tension. Lower stays in groove unless the build is obvious.</span>
+        <input type="range" id="rngBuildIntensity" min="0" max="100" step="1" value="55">
+        <span class="slider-val" id="lblBuildIntensity">55% — balanced</span>
+      </label>
+      <label class="slider-label">Build decay
+        <span class="field-help">Seconds the build can sit below the tension threshold before falling back to groove.</span>
+        <input type="range" id="rngBuildDecay" min="0.5" max="20" step="0.5" value="8">
+        <span class="slider-val" id="lblBuildDecay">8 s</span>
+      </label>
+    </div>
+    <div class="settings-note" id="buildSettingsNote"></div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnBuildSettingsCancel">Close</button>
+        <button type="button" id="btnBuildSettingsSave">Save on Pi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="dropSettingsModal">
+  <div class="modal" role="dialog" aria-labelledby="dropSettingsTitle">
+    <h3 id="dropSettingsTitle">Drop settings</h3>
+    <p class="hint">
+      A drop is a sudden jump in loudness with kick/bass present.
+      Intensity makes hits easier or harder; the rest is how the hit is measured.
+    </p>
+    <div class="settings">
+      <label class="slider-label">Drop intensity
+        <span class="field-help">Higher fires DROP on smaller slams. Lower needs a clearer kick and louder jump.</span>
+        <input type="range" id="rngDropIntensity" min="0" max="100" step="1" value="55">
+        <span class="slider-val" id="lblDropIntensity">55% — balanced</span>
+      </label>
+      <label class="slider-label">Drop length
+        <span class="field-help">How long the DROP look is held before returning to groove.</span>
+        <input type="range" id="rngDropHold" min="2" max="60" step="1" value="16">
+        <span class="slider-val" id="lblDropHold">16 s</span>
+      </label>
+      <label class="slider-label">Rise window
+        <span class="field-help">How far back to look for that jump. Shorter is snappier; longer catches a slower swell into the drop.</span>
+        <input type="range" id="rngDropWindow" min="0.15" max="1.5" step="0.05" value="0.5">
+        <span class="slider-val" id="lblDropWindow">0.50 s</span>
+      </label>
+      <label class="slider-label">Energy rise
+        <span class="field-help">Extra loudness needed versus a moment ago. Higher ignores small bumps.</span>
+        <input type="range" id="rngDropRise" min="0.10" max="1.20" step="0.05" value="0.40">
+        <span class="slider-val" id="lblDropRise">0.40</span>
+      </label>
+      <label class="slider-label">Jump ratio
+        <span class="field-help">How many times louder “now” must be versus the recent average (1.35× = 35% louder).</span>
+        <input type="range" id="rngDropJump" min="1.05" max="2.20" step="0.05" value="1.35">
+        <span class="slider-val" id="lblDropJump">1.35×</span>
+      </label>
+      <label class="slider-label">Min bass / kick
+        <span class="field-help">Drop only if kick/bass is at least this strong. Stops hats and vocals counting as a drop.</span>
+        <input type="range" id="rngDropBass" min="0.20" max="1.40" step="0.05" value="0.70">
+        <span class="slider-val" id="lblDropBass">0.70</span>
+      </label>
+      <label class="slider-label">Min time in section
+        <span class="field-help">Wait this long in the current section before another drop can fire. Cuts double-triggers.</span>
+        <input type="range" id="rngDropMinState" min="0" max="2" step="0.05" value="0.15">
+        <span class="slider-val" id="lblDropMinState">0.15 s</span>
+      </label>
+      <label class="slider-label">Smoothing
+        <span class="field-help">How quickly loudness is smoothed. Lower reacts faster; higher ignores brief spikes.</span>
+        <input type="range" id="rngDropSmooth" min="0.02" max="0.40" step="0.02" value="0.08">
+        <span class="slider-val" id="lblDropSmooth">0.08 s</span>
+      </label>
+      <label class="check-row">
+        <input type="checkbox" id="chkDropGroove" checked>
+        <span>Allow drop from groove</span>
+        <span class="field-help">If on, a drop can fire without going through breakdown or build first.</span>
+      </label>
+      <label class="check-row">
+        <input type="checkbox" id="chkDropOnset" checked>
+        <span>Use onset / spectral hit</span>
+        <span class="field-help">Also fire on a sudden spectral change (crash, snare), not only a loudness jump.</span>
+      </label>
+    </div>
+    <div class="settings-note" id="dropSettingsNote"></div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnDropSettingsCancel">Close</button>
+        <button type="button" id="btnDropSettingsSave">Save on Pi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="breakdownSettingsModal">
+  <div class="modal" role="dialog" aria-labelledby="breakdownSettingsTitle">
+    <h3 id="breakdownSettingsTitle">Breakdown settings</h3>
+    <p class="hint">
+      A breakdown is the kick dropping out of the mix. Intensity is how easily that happens; beats is how long the kick must stay gone.
+    </p>
+    <div class="settings">
+      <label class="slider-label">Breakdown intensity
+        <span class="field-help">Higher enters BREAKDOWN on a shorter kick-out. Lower waits for a clearer, longer gap.</span>
+        <input type="range" id="rngBreakdownIntensity" min="0" max="100" step="1" value="55">
+        <span class="slider-val" id="lblBreakdownIntensity">55% — balanced</span>
+      </label>
+      <label class="slider-label">Kick-gone beats
+        <span class="field-help">Beats of missing kick before a breakdown cue. Style still scales this (punchy / breakdown-first shorter, long-build longer).</span>
+        <input type="range" id="rngBreakdownBeats" min="1" max="16" step="0.5" value="4">
+        <span class="slider-val" id="lblBreakdownBeats">4 beats</span>
+      </label>
+    </div>
+    <div class="settings-note" id="breakdownSettingsNote"></div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnBreakdownSettingsCancel">Close</button>
+        <button type="button" id="btnBreakdownSettingsSave">Save on Pi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="fourFourSettingsModal">
+  <div class="modal" role="dialog" aria-labelledby="fourFourSettingsTitle">
+    <h3 id="fourFourSettingsTitle">4/4 settings</h3>
+    <p class="hint">
+      Channel 11 stays at 255 while a 4/4 kick grid is locked in the music, and 0 when it isn’t.
+      Sensitivity is how easily that lock happens; smoothing delays going on and coming off.
+    </p>
+    <div class="settings">
+      <label class="slider-label">Sensitivity
+        <span class="field-help">Higher locks on a shorter or sloppier kick run. Lower needs a clearer, longer 4/4 before channel 11 goes full.</span>
+        <input type="range" id="rngFourFourIntensity" min="0" max="100" step="1" value="55">
+        <span class="slider-val" id="lblFourFourIntensity">55% — balanced</span>
+      </label>
+      <label class="slider-label">Smoothing
+        <span class="field-help">How long the 4/4 must hold before channel 11 goes to 255, and how long it stays at 255 after the grid slips. 0 follows the lock immediately.</span>
+        <input type="range" id="rngFourFourSmooth" min="0" max="8" step="0.1" value="0.4">
+        <span class="slider-val" id="lblFourFourSmooth">0.4 s</span>
+      </label>
+    </div>
+    <div class="settings-note" id="fourFourSettingsNote"></div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnFourFourSettingsCancel">Close</button>
+        <button type="button" id="btnFourFourSettingsSave">Save on Pi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const COLORS = { groove: "#3fa7ff", breakdown: "#a78bfa", buildup: "#ffb020", drop: "#ff4757", off: "#8a919e" };
-const CH_NAMES = ["groove","breakdown","buildup","drop","ramp","beat","energy","kick","drop_hit","melody","4/4","centroid","tilt","bpm_rate"];
+const CH_CHIPS = [
+  {ch: 1, name: "groove"},
+  {ch: 2, name: "breakdown"},
+  {ch: 3, name: "buildup"},
+  {ch: 4, name: "drop"},
+  {ch: 5, name: "ramp"},
+  {ch: 6, name: "beat"},
+  {ch: 9, name: "drop_hit"},
+  {ch: 11, name: "4/4"},
+  {ch: 14, name: "bpm_rate"},
+];
 const BPM_RATE_LABELS = {32: "1/8", 64: "1/4", 128: "1/2", 255: "1/1"};
-const BOX_IDS = ["settings", "hero", "meters", "spark", "dmx", "log", "matter"];
+const BPM_STEPS = ["eighth", "quarter", "half", "full"];
+const BPM_STEP_LABELS = ["1/8", "1/4", "1/2", "1/1"];
+const BOX_IDS = ["settings", "hero", "dmx", "log", "matter"];
+const HERO_PANES = ["head", "input", "spark", "meters"];
+// Input meter / absolute visualiser span, in dBFS.
+const DB_MIN = -90;
+const DB_MAX = 0;
 const DEFAULT_LAYOUT = {
-  cols: 1,
-  rows: 7,
-  items: BOX_IDS.map((id, i) => ({ id, row: i + 1, col: 1, colSpan: 1, rowSpan: 1 })),
+  sparkHeight: 90,
+  metersHeight: 0,
+  heroOrder: HERO_PANES.slice(),
+  rows: BOX_IDS.map(id => ({ ids: [id], h: 0 })),
 };
 
 const $ = id => document.getElementById(id);
-let lastSection = null;
-let logEntries = [];
-let history = [];
+let specPeaks = [];
+let specCeiling = -90;
 let settingsInit = false;
 let simulateMode = false;
 let currentDeviceHint = "";
 let outputEnabled = true;
 let analyzerOn = true;
+let visualizerOn = true;
+let vizMode = "auto";
+let noiseFloorDb = -55;
+let peakHoldDb = DB_MIN;
+let peakHoldAt = 0;
+let levelHistory = [];
+let logSeq = -1;
 let layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
-let layoutDraft = null;
-let editingLayout = false;
-let selectedBox = null;
 let dragBoxId = null;
+let dragPaneId = null;
+let layoutSaveTimer = null;
 
-for (let i = 0; i < CH_NAMES.length; i++) {
+for (const {ch, name} of CH_CHIPS) {
   const chip = document.createElement("div");
   chip.className = "chip";
-  chip.innerHTML = `<div class="ch">${i+1} &middot; ${CH_NAMES[i]}</div><div class="v" id="dmx${i}">0</div>`;
+  chip.innerHTML = `<div class="ch">${ch} &middot; ${name}</div><div class="v" id="dmx${ch-1}">0</div>`;
   $("dmx").appendChild(chip);
-}
-
-function fmtTime(t) {
-  const m = Math.floor(t / 60), s = Math.floor(t % 60);
-  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 
 function setEnableUI(on) {
@@ -593,17 +1027,38 @@ function setAnalyzeUI(on) {
   $("box-hero").classList.toggle("analyzer-off", !analyzerOn);
 }
 
+function setVisualizerUI(on) {
+  visualizerOn = !!on;
+  $("chkViz").checked = visualizerOn;
+  $("lblVizText").textContent = visualizerOn ? "Visualizer on" : "Visualizer off";
+  $("lblViz").className = "toggle " + (visualizerOn ? "on" : "off");
+  $("box-hero").classList.toggle("viz-off", !visualizerOn);
+  if (!visualizerOn) {
+    specPeaks = [];
+    const c = $("spark");
+    if (c) c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  }
+}
+
 function update(s) {
   if (s.section === undefined) return;
   if (s.enabled !== undefined) setEnableUI(s.enabled);
   if (s.analyzing !== undefined) setAnalyzeUI(s.analyzing);
+  if (s.visualizer !== undefined && !!s.visualizer !== visualizerOn) setVisualizerUI(s.visualizer);
   const color = COLORS[s.section] || "#e8eaed";
 
+  const gated = s.signal_live === false;
   if (!analyzerOn) {
     $("section").textContent = "PAUSED";
     $("section").style.color = COLORS.off;
     $("glow").style.setProperty("--glow-color", COLORS.off);
     $("sectionSub").textContent = "Analyzer off — server/UI still running";
+  } else if (gated) {
+    $("section").textContent = "NO MUSIC";
+    $("section").style.color = COLORS.off;
+    $("glow").style.setProperty("--glow-color", COLORS.off);
+    const quiet = Math.floor(s.quiet_s || 0);
+    $("sectionSub").textContent = `Output paused — no music for ${Math.floor(quiet / 60)}:${String(quiet % 60).padStart(2, "0")}`;
   } else if (!outputEnabled) {
     $("section").textContent = "OFF";
     $("section").style.color = COLORS.off;
@@ -615,65 +1070,395 @@ function update(s) {
     $("glow").style.setProperty("--glow-color", color);
     $("sectionSub").textContent = `for ${Math.floor(s.t_in_state)} s`;
   }
+  const styleName = s.style || "";
+  const styleMode = s.style_mode || "";
+  if ($("styleHint")) {
+    if (styleName) {
+      const auto = styleMode === "auto" ? "auto → " : "";
+      $("styleHint").textContent = auto + styleName.replace("_", " ");
+    } else {
+      $("styleHint").textContent = "";
+    }
+  }
+  const evPct = (v, need) => {
+    const n = Number(need) > 0 ? Number(need) : 1;
+    return Math.min(100, Math.max(0, Number(v || 0) / n * 100)) + "%";
+  };
+  if ($("mEvKick")) {
+    $("mEvKick").style.width = evPct(s.kick_gone, s.kick_need);
+    $("vEvKick").textContent = `${(s.kick_gone ?? 0).toFixed(1)}/${(s.kick_need ?? 0).toFixed(1)}s`;
+    $("mEvBuild").style.width = evPct(s.ev_build, s.ev_need);
+    $("vEvBuild").textContent = `${(s.ev_build ?? 0).toFixed(1)}/${(s.ev_need ?? 0).toFixed(1)}s`;
+    $("mEvFizzle").style.width = evPct(s.ev_fizzle, s.build_decay);
+    $("vEvFizzle").textContent = `${(s.ev_fizzle ?? 0).toFixed(1)}/${(s.build_decay ?? 0).toFixed(1)}s`;
+  }
   $("bpm").textContent = s.bpm > 0 ? s.bpm.toFixed(1) : "—";
   $("beatDot").style.opacity = Math.max(0.08, 1 - s.beat_age * 5);
 
   const pct = (v, max) => Math.min(100, Math.max(0, v / max * 100)) + "%";
-  $("mEnergy").style.width = pct(s.energy, 2);  $("vEnergy").textContent = s.energy.toFixed(2);
-  $("mBass").style.width   = pct(s.bass, 2);    $("vBass").textContent   = s.bass.toFixed(2);
   $("mBuild").style.width  = pct(s.build, 1);   $("vBuild").textContent  = s.build.toFixed(2);
-  $("mMelody").style.width = pct(s.melody ?? 0, 1); $("vMelody").textContent = (s.melody ?? 0).toFixed(2);
-  $("mCentroid").style.width = pct(s.centroid ?? 0, 1); $("vCentroid").textContent = (s.centroid ?? 0).toFixed(2);
-  $("mTilt").style.width = pct(s.tilt ?? 0, 1); $("vTilt").textContent = (s.tilt ?? 0).toFixed(2);
+  $("mMusic").style.width = pct(s.music ?? 0, 1); $("vMusic").textContent = (s.music ?? 0).toFixed(2);
   const br = s.bpm_rate ?? 32;
   $("mBpmRate").style.width = pct(br, 255);
   const nearest = [32, 64, 128, 255].reduce((a, b) => Math.abs(b - br) < Math.abs(a - br) ? b : a);
   $("vBpmRate").textContent = `${Math.round(br)} (${BPM_RATE_LABELS[nearest] || "?"})`;
   $("mRamp").style.width   = pct(s.ramp, 1);    $("vRamp").textContent   = Math.round(s.ramp * 255);
 
-  for (let i = 0; i < CH_NAMES.length; i++) $("dmx" + i).textContent = s.dmx[i] ?? 0;
+  for (const {ch} of CH_CHIPS) $("dmx" + (ch - 1)).textContent = s.dmx[ch - 1] ?? 0;
 
   if (s.meta) $("meta").innerHTML = `${s.meta.source}<br>${s.meta.artnet}<br>${s.meta.matter || ""}`;
 
-  if (lastSection !== null && s.section !== lastSection) {
-    logEntries.unshift(`${fmtTime(s.t)} &nbsp; ${lastSection.toUpperCase()} <b>&rarr; ${s.section.toUpperCase()}</b>`);
-    logEntries = logEntries.slice(0, 8);
-    $("log").innerHTML = logEntries.join("<br>");
+  if (s.noise_floor_db != null && document.activeElement !== $("rngNoiseFloor")) {
+    setNoiseFloorUI(s.noise_floor_db);
   }
-  lastSection = s.section;
+  if (s.visualizer_mode && s.visualizer_mode !== vizMode) setVizModeUI(s.visualizer_mode);
+  updateInputMeter(s);
+  if (s.log_seq != null && s.log_seq !== logSeq) {
+    logSeq = s.log_seq;
+    loadSectionLog();
+  }
 
-  history.push([s.t, s.energy, s.section]);
-  while (history.length && history[0][0] < s.t - 60) history.shift();
-  drawSpark(s.t);
+  if (visualizerOn) drawVisualizer(s);
 }
 
-function drawSpark(now) {
-  const c = $("spark"), ctx = c.getContext("2d");
+function dbToPct(db) {
+  const clamped = Math.max(DB_MIN, Math.min(DB_MAX, Number(db)));
+  return (clamped - DB_MIN) / (DB_MAX - DB_MIN) * 100;
+}
+
+function levelVerdict(rmsDb, peakDb, clipping) {
+  if (clipping || peakDb >= -0.3) return ["err", "CLIPPING — lower the gain"];
+  if (peakDb > -1.5) return ["warn", "very hot"];
+  if (rmsDb < noiseFloorDb) return ["err", "below floor — no signal"];
+  if (rmsDb < noiseFloorDb + 6) return ["warn", "barely above floor"];
+  if (rmsDb < -32) return ["warn", "quiet — raise the gain"];
+  if (rmsDb > -8) return ["warn", "hot"];
+  return ["ok", "good"];
+}
+
+function updateInputMeter(s) {
+  const rmsDb = Number(s.rms_db ?? DB_MIN);
+  const peakDb = Number(s.peak_db ?? DB_MIN);
+  const now = performance.now();
+  // 1.5 s peak hold, so a single transient stays readable.
+  if (peakDb >= peakHoldDb || now - peakHoldAt > 1500) {
+    peakHoldDb = peakDb;
+    peakHoldAt = now;
+  }
+  $("inputRms").style.width = dbToPct(rmsDb) + "%";
+  $("inputPeak").style.width = dbToPct(peakHoldDb) + "%";
+  $("inputFloor").style.left = dbToPct(noiseFloorDb) + "%";
+  const [cls] = levelVerdict(rmsDb, peakHoldDb, !!s.clipping);
+  const el = $("inputVerdict");
+  el.className = "input-verdict " + cls;
+  el.textContent = `${rmsDb.toFixed(0)} / ${peakHoldDb.toFixed(0)} dB`;
+
+  const histSection = (!analyzerOn || s.signal_live === false)
+    ? "off"
+    : (s.section || "off");
+  levelHistory.push([rmsDb, peakDb, histSection]);
+  if (levelHistory.length > 600) levelHistory.shift();
+}
+
+function colorAlpha(hex, a) {
+  const raw = String(hex || "#8a919e");
+  const n = parseInt(raw.replace("#", ""), 16);
+  if (Number.isNaN(n)) return `rgba(138,145,158,${a})`;
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function specColor(t) {
+  const stops = [
+    [0.00, 70, 130, 220],
+    [0.22, 63, 183, 255],
+    [0.42, 72, 187, 120],
+    [0.62, 255, 176, 32],
+    [0.82, 255, 90, 70],
+    [1.00, 255, 71, 87],
+  ];
+  let a = stops[0], b = stops[stops.length - 1];
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) { a = stops[i - 1]; b = stops[i]; break; }
+  }
+  const u = (t - a[0]) / Math.max(1e-6, b[0] - a[0]);
+  const r = Math.round(a[1] + (b[1] - a[1]) * u);
+  const g = Math.round(a[2] + (b[2] - a[2]) * u);
+  const bl = Math.round(a[3] + (b[3] - a[3]) * u);
+  return `rgb(${r},${g},${bl})`;
+}
+
+function sizeSparkCanvas() {
+  const c = $("spark");
+  if (!c) return c;
+  const host = c.parentElement;
+  const w = Math.max(1, Math.floor(host && host.clientWidth ? host.clientWidth : (c.clientWidth || 300)));
+  const h = Math.max(48, Math.floor(host && host.clientHeight ? host.clientHeight : (c.clientHeight || 90)));
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+  }
+  return c;
+}
+
+function drawNoSignal(ctx, c, msg) {
+  ctx.fillStyle = "#5a6270";
+  ctx.font = "12px -apple-system, Segoe UI, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(msg, c.width / 2, Math.max(18, c.height / 2));
+}
+
+function drawVisualizer(s) {
+  if (vizMode === "level") drawLevelHistory(s.section);
+  else drawSpectrum(s.spectrum_db, s.section, s.rms_db);
+}
+
+// Band dBFS -> 0..1 bar height. "auto" tracks a slowly decaying ceiling so
+// the shape fills the pane at any gain; "absolute" pins the top to 0 dBFS
+// and the bottom to the noise floor, so a quiet feed draws short bars.
+function bandHeight(db, ceiling) {
+  if (vizMode === "absolute") {
+    const span = Math.max(6, DB_MAX - noiseFloorDb);
+    return Math.max(0, Math.min(1, (db - noiseFloorDb) / span));
+  }
+  const span = 54;
+  return Math.max(0, Math.min(1, (db - (ceiling - span)) / span));
+}
+
+function drawSpectrum(spec, section, rmsDb) {
+  const c = sizeSparkCanvas(), ctx = c.getContext("2d");
   ctx.clearRect(0, 0, c.width, c.height);
-  if (history.length < 2) return;
-  const x = t => (t - (now - 60)) / 60 * c.width;
-  const y = e => c.height - Math.min(1, e / 2) * (c.height - 8) - 4;
-  ctx.lineWidth = 2.5;
-  for (let i = 1; i < history.length; i++) {
-    ctx.strokeStyle = COLORS[history[i][2]] || "#3fa7ff";
+  if (!spec || !spec.length) {
+    drawNoSignal(ctx, c, "waiting for spectrum…");
+    return;
+  }
+  const n = spec.length;
+  if (specPeaks.length !== n) specPeaks = new Array(n).fill(0);
+  let frameMax = DB_MIN;
+  for (const db of spec) if (db > frameMax) frameMax = db;
+  if (frameMax > specCeiling) specCeiling = frameMax;
+  else if (frameMax < specCeiling - 18) specCeiling = Math.max(frameMax, specCeiling - 2.5);
+  else specCeiling = Math.max(frameMax, specCeiling - 0.35);
+
+  const gap = Math.max(1, Math.floor(c.width / n * 0.12));
+  const barW = Math.max(1, (c.width - gap * (n + 1)) / n);
+  const base = c.height - 14;
+  const maxH = Math.max(8, base - 4);
+  const floorY = base - Math.max(0, Math.min(1, dbToPct(noiseFloorDb) / 100)) * maxH;
+
+  for (let i = 0; i < n; i++) {
+    const v = bandHeight(Number(spec[i]), specCeiling);
+    specPeaks[i] = Math.max(v, specPeaks[i] * 0.86);
+    const h = Math.max(1, specPeaks[i] * maxH);
+    const x = gap + i * (barW + gap);
+    ctx.fillStyle = specColor(i / (n - 1));
+    ctx.globalAlpha = 0.45 + 0.55 * specPeaks[i];
+    ctx.fillRect(x, base - h, barW, h);
+  }
+  ctx.globalAlpha = 1;
+
+  if (vizMode === "absolute") {
+    // The floor line only means anything on a fixed scale.
+    ctx.strokeStyle = "#ffb020";
+    ctx.globalAlpha = 0.7;
+    ctx.setLineDash([5, 4]);
     ctx.beginPath();
-    ctx.moveTo(x(history[i-1][0]), y(history[i-1][1]));
-    ctx.lineTo(x(history[i][0]), y(history[i][1]));
+    ctx.moveTo(0, floorY);
+    ctx.lineTo(c.width, floorY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.fillStyle = COLORS[section] || "#3fa7ff";
+  ctx.globalAlpha = 0.18;
+  ctx.fillRect(0, 0, c.width, 3);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#5a6270";
+  ctx.font = "11px -apple-system, Segoe UI, sans-serif";
+  ctx.textBaseline = "top";
+  const labels = [["40", 0], ["250", 0.28], ["1k", 0.52], ["4k", 0.78], ["8k", 1]];
+  for (const [text, t] of labels) {
+    const x = gap + t * (c.width - gap * 2);
+    ctx.textAlign = t === 0 ? "left" : (t === 1 ? "right" : "center");
+    ctx.fillText(text, x, base + 1);
+  }
+  ctx.textAlign = "right";
+  ctx.fillText(
+    vizMode === "absolute" ? "0 dBFS top" : `auto, top ${Math.round(specCeiling)} dB`,
+    c.width - 2, 2
+  );
+  // Same gate as the input meter — spectrum bins are quieter than RMS.
+  if (Number(rmsDb) < noiseFloorDb) {
+    drawNoSignal(ctx, c, "no signal — check input / gain");
+  }
+}
+
+function drawLevelHistory(section) {
+  const c = sizeSparkCanvas(), ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const base = c.height - 14;
+  const maxH = base - 4;
+  const y = db => base - Math.max(0, Math.min(1, (db - DB_MIN) / (DB_MAX - DB_MIN))) * maxH;
+  const sampleSection = row => row[2] || section || "off";
+
+  ctx.strokeStyle = "#2a2f38";
+  ctx.lineWidth = 1;
+  for (const db of [-12, -24, -36, -48, -60, -72]) {
+    ctx.beginPath();
+    ctx.moveTo(0, y(db));
+    ctx.lineTo(c.width, y(db));
     ctx.stroke();
   }
+
+  const n = levelHistory.length;
+  const step = c.width / Math.max(1, n - 1);
+
+  if (n > 0) {
+    let i = 0;
+    while (i < n) {
+      const sec = sampleSection(levelHistory[i]);
+      let j = i + 1;
+      while (j < n && sampleSection(levelHistory[j]) === sec) j++;
+      const x0 = i * step;
+      const x1 = j >= n ? c.width : j * step;
+      ctx.fillStyle = colorAlpha(COLORS[sec] || COLORS.off, 0.20);
+      ctx.fillRect(x0, 0, Math.max(1, x1 - x0), base);
+      i = j;
+    }
+  }
+
+  if (n > 1) {
+    ctx.strokeStyle = "#d0d6e0";
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    levelHistory.forEach(([, pk], i) => {
+      const py = y(pk);
+      i ? ctx.lineTo(i * step, py) : ctx.moveTo(i * step, py);
+    });
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    let i = 0;
+    while (i < n) {
+      const sec = sampleSection(levelHistory[i]);
+      let j = i + 1;
+      while (j < n && sampleSection(levelHistory[j]) === sec) j++;
+      const color = COLORS[sec] || COLORS.off;
+      ctx.fillStyle = colorAlpha(color, 0.28);
+      ctx.beginPath();
+      ctx.moveTo(i * step, base);
+      for (let k = i; k < j; k++) ctx.lineTo(k * step, y(levelHistory[k][0]));
+      if (j < n) ctx.lineTo(j * step, y(levelHistory[j][0]));
+      ctx.lineTo((j < n ? j : n - 1) * step, base);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      for (let k = i; k < j; k++) {
+        const py = y(levelHistory[k][0]);
+        k === i ? ctx.moveTo(k * step, py) : ctx.lineTo(k * step, py);
+      }
+      if (j < n) ctx.lineTo(j * step, y(levelHistory[j][0]));
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      i = j;
+    }
+  }
+
+  const fy = y(noiseFloorDb);
+  ctx.strokeStyle = "#ffb020";
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, fy);
+  ctx.lineTo(c.width, fy);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "#5a6270";
+  ctx.font = "11px -apple-system, Segoe UI, sans-serif";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.fillText("RMS + peak, last ~30 s — tinted by section", 2, 2);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#ffb020";
+  ctx.fillText(`floor ${noiseFloorDb} dBFS`, c.width - 2, Math.max(2, fy - 13));
 }
 
+const SECTION_LABELS = { groove: "Groove", breakdown: "Breakdown", buildup: "Build-up", drop: "Drop" };
+
+function fmtClock(ts) {
+  const d = new Date(Number(ts) * 1000);
+  const p = n => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function fmtHeld(seconds) {
+  const s = Math.round(Number(seconds) || 0);
+  if (s < 60) return s + "s";
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+function renderSectionLog(rows) {
+  const host = $("seclog");
+  if (!rows || !rows.length) {
+    host.innerHTML = '<div class="empty">Waiting for the first section change&hellip;</div>';
+    return;
+  }
+  const body = rows.slice().reverse().map(r => {
+    const color = COLORS[r.section] || "#e8eaed";
+    const label = SECTION_LABELS[r.section] || r.section;
+    const from = r.from ? (SECTION_LABELS[r.from] || r.from) : "start";
+    return `<tr>
+      <td>${fmtClock(r.ts)}</td>
+      <td class="sec" style="color:${color}">${escapeHtml(label)}</td>
+      <td>${escapeHtml(from)}</td>
+      <td>${fmtHeld(r.held)}</td>
+      <td>${r.bpm > 0 ? Number(r.bpm).toFixed(1) : "&mdash;"}</td>
+      <td>${Number(r.level_db ?? 0).toFixed(0)} dB</td>
+    </tr>`;
+  }).join("");
+  host.innerHTML = `<table>
+    <thead><tr><th>Time</th><th>Entered</th><th>From</th><th>Previous held</th><th>BPM</th><th>Level</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+async function loadSectionLog() {
+  try {
+    const r = await fetch("/api/sections", { cache: "no-store" });
+    const d = await r.json();
+    renderSectionLog(d.sections);
+  } catch (_e) {
+    /* the next section change will retry */
+  }
+}
+
+const GENERIC_DEVICE_LABELS = new Set(["", "default", "pipewire", "pulse", "pulseaudio", "system default"]);
+
 function selectMatchingDevice(sel, current) {
-  if (!current) {
+  if (!current || GENERIC_DEVICE_LABELS.has(String(current).trim().toLowerCase())) {
     sel.value = "";
     return;
   }
-  const lower = current.toLowerCase();
   for (const opt of sel.options) {
-    if (opt.value && opt.value.toLowerCase().includes(lower)) {
+    if (opt.value === current) {
       sel.value = opt.value;
       return;
     }
+  }
+  const lower = current.toLowerCase();
+  const exact = [...sel.options].filter(opt => opt.value && opt.value.toLowerCase() === lower);
+  if (exact.length) {
+    sel.value = exact[0].value;
+    return;
+  }
+  const partial = [...sel.options].filter(opt => opt.value && opt.value.toLowerCase().includes(lower));
+  if (partial.length === 1) {
+    sel.value = partial[0].value;
+    return;
   }
   const opt = document.createElement("option");
   opt.value = current;
@@ -689,13 +1474,16 @@ function fillDeviceSelect(devices, preferred) {
   def.value = "";
   def.textContent = "System default";
   sel.appendChild(def);
-  for (const name of devices) {
+  for (const item of devices || []) {
+    const value = item && typeof item === "object" ? item.value : item;
+    const label = item && typeof item === "object" ? (item.label || item.value) : item;
+    if (!value) continue;
     const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
+    opt.value = value;
+    opt.textContent = label;
     sel.appendChild(opt);
   }
-  if (!devices.length) {
+  if (!devices || !devices.length) {
     const opt = document.createElement("option");
     opt.value = "";
     opt.textContent = "(no devices found)";
@@ -714,201 +1502,450 @@ function syncDecayLabel() {
   $("lblBpmDecay").textContent = fmtDecay($("rngBpmDecay").value);
 }
 
-function fmtIntensity(v) {
+function fmtIntensity(v, easyTip) {
   const n = Number(v);
   let tip = "balanced";
-  if (n <= 30) tip = "groove / monotonous";
-  else if (n >= 75) tip = "aggressive builds";
+  if (n <= 30) tip = "harder / groove";
+  else if (n >= 75) tip = easyTip;
   return n + "% — " + tip;
 }
 
-function syncIntensityLabel() {
-  $("lblIntensity").textContent = fmtIntensity($("rngIntensity").value);
+function syncBuildLabels() {
+  $("lblBuildIntensity").textContent = fmtIntensity($("rngBuildIntensity").value, "easier builds");
+  $("lblBuildDecay").textContent = fmtDecay($("rngBuildDecay").value);
 }
 
 function syncDropHoldLabel() {
   $("lblDropHold").textContent = Number($("rngDropHold").value) + " s";
 }
 
-function cloneLayout(src) {
-  return JSON.parse(JSON.stringify(src));
+function syncDropSettingsLabels() {
+  $("lblDropIntensity").textContent = fmtIntensity($("rngDropIntensity").value, "easier drops");
+  syncDropHoldLabel();
+  $("lblDropWindow").textContent = Number($("rngDropWindow").value).toFixed(2) + " s";
+  $("lblDropRise").textContent = Number($("rngDropRise").value).toFixed(2);
+  $("lblDropJump").textContent = Number($("rngDropJump").value).toFixed(2) + "×";
+  $("lblDropBass").textContent = Number($("rngDropBass").value).toFixed(2);
+  $("lblDropMinState").textContent = Number($("rngDropMinState").value).toFixed(2) + " s";
+  $("lblDropSmooth").textContent = Number($("rngDropSmooth").value).toFixed(2) + " s";
 }
 
-function currentLayout() {
-  return editingLayout && layoutDraft ? layoutDraft : layout;
+function syncFourFourLabels() {
+  $("lblFourFourIntensity").textContent = fmtIntensity($("rngFourFourIntensity").value, "easier lock");
+  const n = Number($("rngFourFourSmooth").value);
+  $("lblFourFourSmooth").textContent = n <= 0 ? "0 s (instant)" : n.toFixed(1) + " s";
+}
+
+function syncBreakdownLabels() {
+  $("lblBreakdownIntensity").textContent = fmtIntensity($("rngBreakdownIntensity").value, "easier breakdown");
+  const n = Number($("rngBreakdownBeats").value);
+  $("lblBreakdownBeats").textContent = n === 1 ? "1 beat" : n + " beats";
+}
+
+function bpmStepIndex(name) {
+  const i = BPM_STEPS.indexOf(String(name || "").toLowerCase());
+  return i < 0 ? 0 : i;
+}
+
+function syncBpmDivider(which) {
+  let lo = Number($("rngBpmLo").value);
+  let hi = Number($("rngBpmHi").value);
+  if (lo > hi) {
+    if (which === "lo") hi = lo;
+    else lo = hi;
+    $("rngBpmLo").value = String(lo);
+    $("rngBpmHi").value = String(hi);
+  }
+  $("rngBpmLo").style.zIndex = which === "lo" ? "4" : "2";
+  $("rngBpmHi").style.zIndex = which === "hi" ? "4" : "3";
+  const fill = $("bpmDividerFill");
+  fill.style.left = (lo / 3 * 100) + "%";
+  fill.style.width = ((hi - lo) / 3 * 100) + "%";
+  $("lblBpmDivider").textContent = BPM_STEP_LABELS[lo] + " – " + BPM_STEP_LABELS[hi];
+}
+
+function setBpmDivider(minName, maxName) {
+  let lo = bpmStepIndex(minName);
+  let hi = bpmStepIndex(maxName);
+  if (lo > hi) { const t = lo; lo = hi; hi = t; }
+  $("rngBpmLo").value = String(lo);
+  $("rngBpmHi").value = String(hi);
+  syncBpmDivider();
+}
+
+function fillBuildForm(meta) {
+  if (!meta) return;
+  const buildI = meta.build_intensity ?? meta.intensity;
+  if (buildI != null) $("rngBuildIntensity").value = String(Math.round(Number(buildI) * 100));
+  if (meta.build_decay_seconds != null) $("rngBuildDecay").value = String(meta.build_decay_seconds);
+  syncBuildLabels();
+}
+
+function fillDropForm(meta) {
+  if (!meta) return;
+  const dropI = meta.drop_intensity ?? meta.intensity;
+  if (dropI != null) $("rngDropIntensity").value = String(Math.round(Number(dropI) * 100));
+  if (meta.drop_hold_seconds != null) $("rngDropHold").value = String(Math.round(Number(meta.drop_hold_seconds)));
+  if (meta.drop_rise_window != null) $("rngDropWindow").value = String(meta.drop_rise_window);
+  if (meta.drop_rise != null) $("rngDropRise").value = String(meta.drop_rise);
+  if (meta.drop_energy_jump != null) $("rngDropJump").value = String(meta.drop_energy_jump);
+  if (meta.drop_min_bass != null) $("rngDropBass").value = String(meta.drop_min_bass);
+  if (meta.drop_min_state_seconds != null) $("rngDropMinState").value = String(meta.drop_min_state_seconds);
+  if (meta.drop_smooth_seconds != null) $("rngDropSmooth").value = String(meta.drop_smooth_seconds);
+  if (meta.drop_from_groove !== undefined) $("chkDropGroove").checked = !!meta.drop_from_groove;
+  if (meta.drop_use_onset !== undefined) $("chkDropOnset").checked = !!meta.drop_use_onset;
+  syncDropSettingsLabels();
+}
+
+function fillFourFourForm(meta) {
+  if (!meta) return;
+  if (meta.four_four_intensity != null) {
+    $("rngFourFourIntensity").value = String(Math.round(Number(meta.four_four_intensity) * 100));
+  }
+  if (meta.four_four_smooth_seconds != null) {
+    $("rngFourFourSmooth").value = String(meta.four_four_smooth_seconds);
+  }
+  syncFourFourLabels();
+}
+
+function fillBreakdownForm(meta) {
+  if (!meta) return;
+  if (meta.breakdown_intensity != null) {
+    $("rngBreakdownIntensity").value = String(Math.round(Number(meta.breakdown_intensity) * 100));
+  }
+  if (meta.breakdown_beats != null) {
+    $("rngBreakdownBeats").value = String(meta.breakdown_beats);
+  }
+  syncBreakdownLabels();
+}
+
+function collectDropSettings() {
+  return {
+    drop_intensity: Number($("rngDropIntensity").value) / 100,
+    drop_hold_seconds: Number($("rngDropHold").value),
+    drop_sensing: {
+      drop_rise_window: Number($("rngDropWindow").value),
+      drop_rise: Number($("rngDropRise").value),
+      drop_energy_jump: Number($("rngDropJump").value),
+      drop_min_bass: Number($("rngDropBass").value),
+      drop_min_state_seconds: Number($("rngDropMinState").value),
+      drop_smooth_seconds: Number($("rngDropSmooth").value),
+      drop_from_groove: $("chkDropGroove").checked,
+      drop_use_onset: $("chkDropOnset").checked,
+    },
+  };
+}
+
+function setModalOpen(id, on) {
+  $(id).classList.toggle("open", !!on);
 }
 
 function boxEl(id) {
   return document.querySelector(`[data-box="${id}"]`);
 }
 
-function itemFor(id, lay) {
-  return (lay.items || []).find(it => it.id === id);
+function rowFor(id, lay) {
+  return (lay.rows || []).find(r => (r.ids || []).includes(id));
+}
+
+function clampHeight(h) {
+  h = Number(h) || 0;
+  return h >= 80 && h <= 2000 ? h : 0;
+}
+
+function normalizeLayout(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const rows = [];
+  const seen = new Set();
+  const addRow = (ids, h) => {
+    const keep = [];
+    for (const id of ids || []) {
+      if (!BOX_IDS.includes(id) || seen.has(id)) continue;
+      keep.push(id);
+      seen.add(id);
+    }
+    if (keep.length) rows.push({ ids: keep, h: clampHeight(h) });
+  };
+  if (Array.isArray(src.rows) && src.rows.length) {
+    for (const rawRow of src.rows) {
+      if (Array.isArray(rawRow)) addRow(rawRow, 0);
+      else if (rawRow && typeof rawRow === "object") addRow(rawRow.ids, rawRow.h);
+    }
+  } else if (Array.isArray(src.windows) && src.windows.length) {
+    for (const win of src.windows) {
+      if (win && BOX_IDS.includes(win.id)) addRow([win.id], win.h);
+    }
+  } else {
+    const items = [...(src.items || [])]
+      .filter(it => it && BOX_IDS.includes(it.id))
+      .sort((a, b) => (a.row - b.row) || (a.col - b.col));
+    for (const it of items) addRow([it.id], it.heightPx);
+  }
+  for (const id of BOX_IDS) {
+    if (!seen.has(id)) addRow([id], 0);
+  }
+  return {
+    sparkHeight: src.sparkHeight,
+    metersHeight: src.metersHeight,
+    heroOrder: src.heroOrder,
+    rows,
+  };
+}
+
+function applyHeroLayout(lay) {
+  const hero = $("box-hero");
+  const sparkH = Math.max(48, Math.min(360, Number(lay.sparkHeight) || 90));
+  const metersH = Math.max(0, Math.min(280, Number(lay.metersHeight) || 0));
+  hero.style.setProperty("--spark-h", sparkH + "px");
+  hero.style.setProperty("--meters-h", metersH ? metersH + "px" : "0px");
+  const order = normalizeHeroOrder(lay.heroOrder);
+  lay.heroOrder = order;
+  const stack = $("heroStack");
+  for (const id of order) {
+    const pane = stack.querySelector(`[data-pane="${id}"]`);
+    if (pane) stack.appendChild(pane);
+  }
+}
+
+function normalizeHeroOrder(raw) {
+  const seen = new Set();
+  const order = [];
+  for (const id of raw || []) {
+    if (HERO_PANES.includes(id) && !seen.has(id)) {
+      order.push(id);
+      seen.add(id);
+    }
+  }
+  for (const id of HERO_PANES) {
+    if (!seen.has(id)) order.push(id);
+  }
+  return order;
 }
 
 function applyLayout(lay) {
-  const grid = $("layoutGrid");
-  const cols = Math.max(1, Math.min(4, Number(lay.cols) || 1));
-  const rows = Math.max(1, Math.min(8, Number(lay.rows) || 6));
-  grid.style.setProperty("--cols", cols);
-  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-  // Equal row tracks so a tall panel (rowSpan>1) matches stacked neighbors.
-  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
-  if (!editingLayout) {
-    grid.style.minHeight = rows > 1 || cols > 1 ? "72vh" : "";
-  }
-  $("wrap").style.maxWidth = cols > 1 ? "1200px" : "780px";
-
-  for (const id of BOX_IDS) {
-    const el = boxEl(id);
-    const it = itemFor(id, lay) || { row: 1, col: 1, colSpan: 1, rowSpan: 1 };
-    const col = Math.max(1, Math.min(cols, it.col || 1));
-    const row = Math.max(1, Math.min(rows, it.row || 1));
-    const colSpan = Math.max(1, Math.min(cols - col + 1, it.colSpan || 1));
-    const rowSpan = Math.max(1, Math.min(rows - row + 1, it.rowSpan || 1));
-    el.style.gridColumn = `${col} / span ${colSpan}`;
-    el.style.gridRow = `${row} / span ${rowSpan}`;
-    el.style.zIndex = "2";
-    const sel = el.querySelector(".span-select");
-    if (sel) {
-      sel.innerHTML = "";
-      for (let s = 1; s <= cols; s++) {
-        const opt = document.createElement("option");
-        opt.value = String(s);
-        opt.textContent = "W×" + s;
-        if (s === colSpan) opt.selected = true;
-        sel.appendChild(opt);
+  const dock = $("layoutGrid");
+  applyHeroLayout(lay);
+  const rows = lay.rows || [];
+  const stale = [...dock.querySelectorAll(".dock-row")];
+  for (const row of rows) {
+    const rowEl = document.createElement("div");
+    rowEl.className = "dock-row";
+    if ((row.ids || []).length > 1) rowEl.classList.add("split");
+    const h = clampHeight(row.h);
+    for (const id of row.ids || []) {
+      const el = boxEl(id);
+      if (!el) continue;
+      rowEl.appendChild(el);
+      if (h >= 80) {
+        el.style.height = h + "px";
+        el.classList.add("has-height");
+      } else {
+        el.style.height = "";
+        el.classList.remove("has-height");
       }
     }
-    const rsel = el.querySelector(".row-span-select");
-    if (rsel) {
-      rsel.innerHTML = "";
-      for (let s = 1; s <= rows; s++) {
-        const opt = document.createElement("option");
-        opt.value = String(s);
-        opt.textContent = "H×" + s;
-        if (s === rowSpan) opt.selected = true;
-        rsel.appendChild(opt);
-      }
-    }
+    dock.appendChild(rowEl);
   }
-  renderEditCells(lay);
+  stale.forEach(el => el.remove());
+  $("wrap").style.maxWidth = rows.some(r => (r.ids || []).length > 1) ? "1240px" : "780px";
 }
 
-function clearEditCells() {
-  $("layoutGrid").querySelectorAll(".grid-cell").forEach(n => n.remove());
+function scheduleSaveLayout() {
+  clearTimeout(layoutSaveTimer);
+  layoutSaveTimer = setTimeout(saveLayoutNow, 700);
 }
 
-function renderEditCells(lay) {
-  clearEditCells();
-  if (!editingLayout) return;
-  const cols = lay.cols, rows = lay.rows;
-  for (let r = 1; r <= rows; r++) {
-    for (let c = 1; c <= cols; c++) {
-      const cell = document.createElement("div");
-      cell.className = "grid-cell";
-      cell.style.gridColumn = String(c);
-      cell.style.gridRow = String(r);
-      cell.style.zIndex = "1";
-      cell.dataset.row = String(r);
-      cell.dataset.col = String(c);
-      cell.textContent = r + "," + c;
-      cell.onclick = () => placeSelectedAt(r, c);
-      cell.ondragover = ev => { ev.preventDefault(); cell.classList.add("drop-target"); };
-      cell.ondragleave = () => cell.classList.remove("drop-target");
-      cell.ondrop = ev => {
-        ev.preventDefault();
-        cell.classList.remove("drop-target");
-        const id = ev.dataTransfer.getData("text/box-id") || dragBoxId;
-        if (id) placeBoxAt(id, r, c);
-      };
-      $("layoutGrid").appendChild(cell);
-    }
-  }
-}
-
-function placeBoxAt(id, row, col) {
-  if (!layoutDraft) return;
-  const it = itemFor(id, layoutDraft);
-  if (!it) return;
-  it.row = row;
-  it.col = col;
-  it.colSpan = Math.min(it.colSpan || 1, layoutDraft.cols - col + 1);
-  selectedBox = id;
-  document.querySelectorAll(".box").forEach(el => {
-    el.classList.toggle("editing-selected", el.dataset.box === id);
-  });
-  applyLayout(layoutDraft);
-}
-
-function placeSelectedAt(row, col) {
-  if (!selectedBox) {
-    $("settingsNote").className = "settings-note";
-    $("settingsNote").textContent = "Select a panel first (click it), then a grid cell.";
-    return;
-  }
-  placeBoxAt(selectedBox, row, col);
-}
-
-function setEditing(on) {
-  editingLayout = on;
-  $("layoutBar").classList.toggle("open", on);
-  $("layoutGrid").classList.toggle("editing", on);
-  $("btnEditLayout").textContent = on ? "Editing…" : "Edit layout";
-  if (on) {
-    layoutDraft = cloneLayout(layout);
-    $("inCols").value = String(layoutDraft.cols);
-    $("inRows").value = String(layoutDraft.rows);
-    selectedBox = null;
-    applyLayout(layoutDraft);
-  } else {
-    layoutDraft = null;
-    selectedBox = null;
-    document.querySelectorAll(".box").forEach(el => el.classList.remove("editing-selected"));
-    clearEditCells();
-    applyLayout(layout);
-  }
-}
-
-function wireBoxChrome() {
-  for (const id of BOX_IDS) {
-    const el = boxEl(id);
-    el.addEventListener("click", ev => {
-      if (!editingLayout) return;
-      if (ev.target.closest(".box-chrome")) return;
-      selectedBox = id;
-      document.querySelectorAll(".box").forEach(b => {
-        b.classList.toggle("editing-selected", b.dataset.box === id);
-      });
+async function saveLayoutNow() {
+  try {
+    const r = await fetch("/api/layout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout }),
     });
-    const drag = el.querySelector(".drag");
-    drag.addEventListener("dragstart", ev => {
-      if (!editingLayout) { ev.preventDefault(); return; }
+    const d = await r.json();
+    if (r.ok && d.layout) layout = normalizeLayout(d.layout);
+  } catch (_e) {
+    /* keep local layout if the Pi is briefly unreachable */
+  }
+}
+
+function clearSnapMarks() {
+  document.querySelectorAll(".box").forEach(el => {
+    el.classList.remove("snap-top", "snap-bottom", "snap-left", "snap-right");
+  });
+}
+
+function snapSide(ev, rect) {
+  const x = (ev.clientX - rect.left) / Math.max(1, rect.width);
+  const y = (ev.clientY - rect.top) / Math.max(1, rect.height);
+  const edges = [
+    ["left", x],
+    ["right", 1 - x],
+    ["top", y],
+    ["bottom", 1 - y],
+  ];
+  edges.sort((a, b) => a[1] - b[1]);
+  return edges[0][0];
+}
+
+function placeWindow(src, dest, side) {
+  const rows = (layout.rows || [])
+    .map(r => ({ ids: r.ids.filter(id => id !== src), h: r.h }))
+    .filter(r => r.ids.length);
+  const destRow = rows.find(r => r.ids.includes(dest));
+  if (!destRow) return;
+  const destIdx = rows.indexOf(destRow);
+  if (side === "top") {
+    rows.splice(destIdx, 0, { ids: [src], h: 0 });
+  } else if (side === "bottom") {
+    rows.splice(destIdx + 1, 0, { ids: [src], h: 0 });
+  } else if (side === "left") {
+    destRow.ids.splice(destRow.ids.indexOf(dest), 0, src);
+  } else {
+    destRow.ids.splice(destRow.ids.indexOf(dest) + 1, 0, src);
+  }
+  layout.rows = rows;
+}
+
+function wireWindows() {
+  for (const id of BOX_IDS) {
+    const el = boxEl(id);
+    const bar = el.querySelector(".win-bar");
+    bar.addEventListener("dragstart", ev => {
       dragBoxId = id;
-      selectedBox = id;
+      el.classList.add("dragging");
       ev.dataTransfer.setData("text/box-id", id);
       ev.dataTransfer.effectAllowed = "move";
     });
-    drag.addEventListener("dragend", () => { dragBoxId = null; });
-    const span = el.querySelector(".span-select");
-    span.addEventListener("change", () => {
-      if (!layoutDraft) return;
-      const it = itemFor(id, layoutDraft);
-      if (!it) return;
-      it.colSpan = Number(span.value) || 1;
-      it.colSpan = Math.min(it.colSpan, layoutDraft.cols - it.col + 1);
-      applyLayout(layoutDraft);
+    bar.addEventListener("dragend", () => {
+      dragBoxId = null;
+      el.classList.remove("dragging");
+      clearSnapMarks();
     });
-    const rspan = el.querySelector(".row-span-select");
-    rspan.addEventListener("change", () => {
-      if (!layoutDraft) return;
-      const it = itemFor(id, layoutDraft);
-      if (!it) return;
-      it.rowSpan = Number(rspan.value) || 1;
-      it.rowSpan = Math.min(it.rowSpan, layoutDraft.rows - it.row + 1);
-      applyLayout(layoutDraft);
+    el.addEventListener("dragover", ev => {
+      if (!dragBoxId || dragBoxId === id) return;
+      ev.preventDefault();
+      const side = snapSide(ev, el.getBoundingClientRect());
+      el.classList.toggle("snap-top", side === "top");
+      el.classList.toggle("snap-bottom", side === "bottom");
+      el.classList.toggle("snap-left", side === "left");
+      el.classList.toggle("snap-right", side === "right");
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("snap-top", "snap-bottom", "snap-left", "snap-right"));
+    el.addEventListener("drop", ev => {
+      ev.preventDefault();
+      const src = ev.dataTransfer.getData("text/box-id") || dragBoxId;
+      const side = snapSide(ev, el.getBoundingClientRect());
+      el.classList.remove("snap-top", "snap-bottom", "snap-left", "snap-right");
+      if (!src || src === id) return;
+      placeWindow(src, id, side);
+      applyLayout(layout);
+      scheduleSaveLayout();
+    });
+    const handle = document.createElement("div");
+    handle.className = "win-resize";
+    handle.title = "Drag to resize. Double-click for auto height.";
+    el.appendChild(handle);
+    handle.addEventListener("pointerdown", ev => startWinResize(ev, id, el));
+    handle.addEventListener("dblclick", ev => {
+      ev.preventDefault();
+      const row = rowFor(id, layout);
+      if (!row) return;
+      row.h = 0;
+      applyLayout(layout);
+      scheduleSaveLayout();
     });
   }
+}
+
+function startWinResize(ev, id, el) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const row = rowFor(id, layout);
+  if (!row) return;
+  const startY = ev.clientY;
+  const startH = el.getBoundingClientRect().height;
+  const move = e => {
+    row.h = Math.max(80, Math.min(2000, Math.round(startH + (e.clientY - startY))));
+    applyLayout(layout);
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    scheduleSaveLayout();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+function wireHeroPanes() {
+  const stack = $("heroStack");
+  stack.querySelectorAll(".pane-grip").forEach(grip => {
+    const pane = grip.closest(".hero-pane");
+    grip.addEventListener("dragstart", ev => {
+      dragPaneId = pane.dataset.pane;
+      ev.dataTransfer.setData("text/pane-id", dragPaneId);
+      ev.dataTransfer.effectAllowed = "move";
+    });
+    grip.addEventListener("dragend", () => { dragPaneId = null; });
+  });
+  stack.querySelectorAll(".hero-pane").forEach(pane => {
+    pane.addEventListener("dragover", ev => {
+      if (!dragPaneId) return;
+      ev.preventDefault();
+      pane.classList.add("drag-over");
+    });
+    pane.addEventListener("dragleave", () => pane.classList.remove("drag-over"));
+    pane.addEventListener("drop", ev => {
+      ev.preventDefault();
+      pane.classList.remove("drag-over");
+      const src = ev.dataTransfer.getData("text/pane-id") || dragPaneId;
+      const dst = pane.dataset.pane;
+      if (!src || src === dst) return;
+      const order = normalizeHeroOrder(layout.heroOrder);
+      const from = order.indexOf(src);
+      const to = order.indexOf(dst);
+      if (from < 0 || to < 0) return;
+      order.splice(from, 1);
+      order.splice(to, 0, src);
+      layout.heroOrder = order;
+      applyHeroLayout(layout);
+      scheduleSaveLayout();
+    });
+  });
+  stack.querySelectorAll(".pane-split").forEach(split => {
+    split.addEventListener("pointerdown", ev => startPaneResize(ev, split.dataset.resize));
+    split.addEventListener("dblclick", () => {
+      if (split.dataset.resize === "spark") layout.sparkHeight = 90;
+      else layout.metersHeight = 0;
+      applyHeroLayout(layout);
+      scheduleSaveLayout();
+    });
+  });
+}
+
+function startPaneResize(ev, which) {
+  ev.preventDefault();
+  const startY = ev.clientY;
+  const startSpark = Math.max(48, Number(layout.sparkHeight) || 90);
+  const metersEl = document.querySelector(".hero-meters");
+  const startMeters = Math.max(metersEl.getBoundingClientRect().height, Number(layout.metersHeight) || 0);
+  const move = e => {
+    const dy = e.clientY - startY;
+    if (which === "spark") {
+      layout.sparkHeight = Math.max(48, Math.min(360, Math.round(startSpark + dy)));
+    } else {
+      layout.metersHeight = Math.max(64, Math.min(280, Math.round(startMeters + dy)));
+    }
+    applyHeroLayout(layout);
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    scheduleSaveLayout();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
 }
 
 function fillInterfaceSelect(ifaces, preferred) {
@@ -989,6 +2026,24 @@ function maybeDefaultMatterPort() {
   if (proto === "artnet" && (port === 5568 || !port)) $("inMatterPort").value = "6454";
 }
 
+function applySidecarNote(status) {
+  const note = $("matterNote");
+  if (!note || !status) return;
+  if (note.dataset.user === "1") return;
+  if (status === "running") {
+    note.className = "settings-note";
+    note.textContent = "";
+    return;
+  }
+  if (status.startsWith("starting")) {
+    note.className = "settings-note";
+    note.textContent = "Matter sidecar starting…";
+    return;
+  }
+  note.className = "settings-note err";
+  note.textContent = status;
+}
+
 function applyMetaToForm(meta, devices, interfaces) {
   simulateMode = !!meta.simulate;
   currentDeviceHint = meta.device || "";
@@ -1006,32 +2061,38 @@ function applyMetaToForm(meta, devices, interfaces) {
   $("inMatterPriority").value = meta.matter_priority ?? 100;
   $("selMatterEnabled").value = meta.matter_enabled === false ? "0" : "1";
   syncOutputLabels();
-  if (meta.bpm_rate_min) $("selBpmMin").value = meta.bpm_rate_min;
-  if (meta.bpm_rate_max) $("selBpmMax").value = meta.bpm_rate_max;
+  if (meta.bpm_rate_min || meta.bpm_rate_max) {
+    setBpmDivider(meta.bpm_rate_min || "eighth", meta.bpm_rate_max || "full");
+  }
   if (meta.bpm_rate_decay !== undefined && meta.bpm_rate_decay !== null) {
     $("rngBpmDecay").value = String(meta.bpm_rate_decay);
     syncDecayLabel();
   }
-  if (meta.intensity !== undefined && meta.intensity !== null) {
-    $("rngIntensity").value = String(Math.round(Number(meta.intensity) * 100));
-    syncIntensityLabel();
-  }
-  if (meta.drop_hold_seconds !== undefined && meta.drop_hold_seconds !== null) {
-    $("rngDropHold").value = String(Math.round(Number(meta.drop_hold_seconds)));
-    syncDropHoldLabel();
-  }
+  fillBuildForm(meta);
+  fillDropForm(meta);
+  fillFourFourForm(meta);
+  fillBreakdownForm(meta);
+  if (meta.noise_floor_db != null) setNoiseFloorUI(meta.noise_floor_db);
+  setVizModeUI(meta.visualizer_mode || "auto");
+  if (meta.style) $("selStyle").value = meta.style;
+  if (meta.silence_gate !== undefined) $("chkSilenceGate").checked = !!meta.silence_gate;
   if (meta.enabled !== undefined) setEnableUI(meta.enabled);
   if (meta.analyzing !== undefined) setAnalyzeUI(meta.analyzing);
+  if (meta.visualizer !== undefined) setVisualizerUI(meta.visualizer);
   $("meta").innerHTML = `${meta.source || ""}<br>${meta.artnet || ""}<br>${meta.matter || ""}`;
+  applySidecarNote(meta.matter_sidecar);
 
   if (simulateMode) {
     $("selDevice").innerHTML = "<option value=''>(simulation mode)</option>";
     $("selDevice").disabled = true;
+    $("selInputChannel").disabled = true;
     $("btnRefresh").disabled = true;
   } else {
     $("selDevice").disabled = false;
     $("btnRefresh").disabled = false;
     fillDeviceSelect(devices || [], meta.device);
+    $("selInputChannel").disabled = false;
+    $("selInputChannel").value = meta.input_channel || "left";
   }
 
   if (meta.dry_run) {
@@ -1050,9 +2111,10 @@ async function bootstrapSettings() {
     const d = await r.json();
     applyMetaToForm(d.meta, d.devices, d.interfaces);
     if (d.layout) {
-      layout = d.layout;
-      if (!editingLayout) applyLayout(layout);
+      layout = normalizeLayout(d.layout);
+      applyLayout(layout);
     }
+    loadSectionLog();
     if (!d.meta.dry_run) $("settingsNote").textContent = "";
   } catch (e) {
     $("settingsNote").className = "settings-note err";
@@ -1076,68 +2138,119 @@ $("btnRefresh").onclick = () => {
   if (!simulateMode) loadDevices(currentDeviceHint);
 };
 
+function setNoiseFloorUI(db) {
+  noiseFloorDb = Math.max(-90, Math.min(-20, Math.round(Number(db))));
+  $("rngNoiseFloor").value = String(noiseFloorDb);
+  $("vNoiseFloor").textContent = noiseFloorDb + " dBFS";
+}
+
+function setVizModeUI(mode) {
+  vizMode = ["auto", "absolute", "level"].includes(mode) ? mode : "auto";
+  $("selVizMode").value = vizMode;
+  specPeaks = [];
+  specCeiling = -90;
+}
+
+let floorSaveTimer = null;
+$("rngNoiseFloor").oninput = () => {
+  setNoiseFloorUI($("rngNoiseFloor").value);
+  clearTimeout(floorSaveTimer);
+  floorSaveTimer = setTimeout(() => {
+    postSettings({ noise_floor_db: noiseFloorDb }, "settingsNote", "Noise floor saved");
+  }, 400);
+};
+
+$("selVizMode").onchange = () => {
+  setVizModeUI($("selVizMode").value);
+  postSettings({ visualizer_mode: vizMode }, "settingsNote", "Visualizer view saved");
+};
+
+$("selDevice").onchange = () => applyAudioInput();
+$("selInputChannel").onchange = () => applyAudioInput();
+
+async function applyAudioInput() {
+  if ($("selDevice").disabled) return;
+  currentDeviceHint = $("selDevice").value;
+  await postSettings({
+    device: $("selDevice").value,
+    input_channel: $("selInputChannel").value,
+  }, "settingsNote", "Input switched");
+}
+
 $("rngBpmDecay").oninput = syncDecayLabel;
-$("rngIntensity").oninput = syncIntensityLabel;
-$("rngDropHold").oninput = syncDropHoldLabel;
+$("rngBpmLo").oninput = () => syncBpmDivider("lo");
+$("rngBpmHi").oninput = () => syncBpmDivider("hi");
+$("rngBuildIntensity").oninput = syncBuildLabels;
+$("rngBuildDecay").oninput = syncBuildLabels;
+$("rngDropIntensity").oninput = syncDropSettingsLabels;
+$("rngDropHold").oninput = syncDropSettingsLabels;
+["rngDropWindow","rngDropRise","rngDropJump","rngDropBass","rngDropMinState","rngDropSmooth"].forEach(id => {
+  $(id).oninput = syncDropSettingsLabels;
+});
+$("rngFourFourIntensity").oninput = syncFourFourLabels;
+$("rngFourFourSmooth").oninput = syncFourFourLabels;
+$("rngBreakdownIntensity").oninput = syncBreakdownLabels;
+$("rngBreakdownBeats").oninput = syncBreakdownLabels;
 syncDecayLabel();
-syncIntensityLabel();
-syncDropHoldLabel();
-wireBoxChrome();
-applyLayout(layout);
+syncBpmDivider();
+syncBuildLabels();
+syncDropSettingsLabels();
+syncFourFourLabels();
+syncBreakdownLabels();
 
-$("btnEditLayout").onclick = () => setEditing(!editingLayout);
-
-$("inCols").onchange = () => {
-  if (!layoutDraft) return;
-  layoutDraft.cols = Math.max(1, Math.min(4, Number($("inCols").value) || 1));
-  $("inCols").value = String(layoutDraft.cols);
-  for (const it of layoutDraft.items) {
-    it.col = Math.min(it.col, layoutDraft.cols);
-    it.colSpan = Math.min(it.colSpan, layoutDraft.cols - it.col + 1);
-  }
-  applyLayout(layoutDraft);
-};
-$("inRows").onchange = () => {
-  if (!layoutDraft) return;
-  layoutDraft.rows = Math.max(1, Math.min(8, Number($("inRows").value) || 1));
-  $("inRows").value = String(layoutDraft.rows);
-  for (const it of layoutDraft.items) {
-    it.row = Math.min(it.row, layoutDraft.rows);
-    it.rowSpan = Math.min(it.rowSpan || 1, layoutDraft.rows - it.row + 1);
-  }
-  applyLayout(layoutDraft);
-};
-
-$("btnLayoutReset").onclick = () => {
-  layoutDraft = cloneLayout(DEFAULT_LAYOUT);
-  $("inCols").value = "1";
-  $("inRows").value = "6";
-  applyLayout(layoutDraft);
-};
-
-$("btnLayoutCancel").onclick = () => setEditing(false);
-
-$("btnLayoutSave").onclick = async () => {
-  if (!layoutDraft) return;
-  layoutDraft.cols = Math.max(1, Math.min(4, Number($("inCols").value) || 1));
-  layoutDraft.rows = Math.max(1, Math.min(8, Number($("inRows").value) || 1));
+async function postSettings(body, noteEl, okText) {
+  const note = $(noteEl);
+  note.className = "settings-note";
+  note.textContent = "Saving…";
   try {
-    const r = await fetch("/api/layout", {
+    const r = await fetch("/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ layout: layoutDraft }),
+      body: JSON.stringify(body),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "save failed");
-    layout = d.layout;
-    setEditing(false);
+    note.className = "settings-note ok";
+    note.textContent = d.message || okText;
     $("settingsNote").className = "settings-note ok";
-    $("settingsNote").textContent = "Layout saved on the Pi";
+    $("settingsNote").textContent = d.message || okText;
   } catch (e) {
-    $("settingsNote").className = "settings-note err";
-    $("settingsNote").textContent = "could not save layout: " + e;
+    note.className = "settings-note err";
+    note.textContent = String(e.message || e);
   }
-};
+}
+
+function wireModal(id, openBtn, cancelBtn) {
+  $(openBtn).onclick = () => setModalOpen(id, true);
+  $(cancelBtn).onclick = () => setModalOpen(id, false);
+  $(id).addEventListener("click", ev => {
+    if (ev.target === $(id)) setModalOpen(id, false);
+  });
+}
+wireModal("buildSettingsModal", "btnBuildSettings", "btnBuildSettingsCancel");
+wireModal("dropSettingsModal", "btnDropSettings", "btnDropSettingsCancel");
+wireModal("fourFourSettingsModal", "btnFourFourSettings", "btnFourFourSettingsCancel");
+wireModal("breakdownSettingsModal", "btnBreakdownSettings", "btnBreakdownSettingsCancel");
+$("btnBuildSettingsSave").onclick = () => postSettings({
+  build_intensity: Number($("rngBuildIntensity").value) / 100,
+  build_decay_seconds: Number($("rngBuildDecay").value),
+}, "buildSettingsNote", "Build settings saved");
+$("btnDropSettingsSave").onclick = () => postSettings(
+  collectDropSettings(),
+  "dropSettingsNote",
+  "Drop settings saved"
+);
+$("btnFourFourSettingsSave").onclick = () => postSettings({
+  four_four_intensity: Number($("rngFourFourIntensity").value) / 100,
+  four_four_smooth_seconds: Number($("rngFourFourSmooth").value),
+}, "fourFourSettingsNote", "4/4 settings saved");
+$("btnBreakdownSettingsSave").onclick = () => postSettings({
+  breakdown_intensity: Number($("rngBreakdownIntensity").value) / 100,
+  breakdown_beats: Number($("rngBreakdownBeats").value),
+}, "breakdownSettingsNote", "Breakdown settings saved");
+wireWindows();
+wireHeroPanes();
+applyLayout(layout);
 
 async function postEnableBody(body, revert) {
   try {
@@ -1174,6 +2287,12 @@ $("chkAnalyze").onchange = async () => {
   await postEnableBody({ analyzing: on }, () => setAnalyzeUI(!on));
 };
 
+$("chkViz").onchange = async () => {
+  const on = $("chkViz").checked;
+  setVisualizerUI(on);
+  await postEnableBody({ visualizer: on }, () => setVisualizerUI(!on));
+};
+
 $("selProtocol").onchange = () => {
   fillModeOptions("selMode", $("selProtocol").value, $("selMode").value);
   maybeDefaultPort();
@@ -1187,6 +2306,44 @@ $("selMatterProtocol").onchange = () => {
 $("selMode").onchange = syncOutputLabels;
 $("selMatterMode").onchange = syncOutputLabels;
 syncOutputLabels();
+
+function collectMatterSettings() {
+  const body = {
+    matter_protocol: $("selMatterProtocol").value,
+    matter_mode: $("selMatterMode").value,
+    matter_port: Number($("inMatterPort").value),
+    matter_universe: Number($("inMatterUni").value),
+    matter_priority: Number($("inMatterPriority").value),
+    matter_enabled: $("selMatterEnabled").value === "1",
+  };
+  if ($("selMatterMode").value === "unicast") body.ip = $("inIp").value.trim();
+  return body;
+}
+
+$("btnMatterApply").onclick = async () => {
+  const btn = $("btnMatterApply"), note = $("matterNote");
+  btn.disabled = true;
+  note.className = "settings-note";
+  note.textContent = "applying\u2026";
+  try {
+    const body = collectMatterSettings();
+    const r = await fetch("/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "failed to apply");
+    note.className = "settings-note ok";
+    note.textContent = d.message;
+    fillModeOptions("selMatterMode", body.matter_protocol, body.matter_mode);
+    syncOutputLabels();
+  } catch (e) {
+    note.className = "settings-note err";
+    note.textContent = String(e.message || e);
+  }
+  btn.disabled = false;
+};
 
 $("btnApply").onclick = async () => {
   const btn = $("btnApply"), note = $("settingsNote");
@@ -1207,16 +2364,19 @@ $("btnApply").onclick = async () => {
       matter_universe: Number($("inMatterUni").value),
       matter_priority: Number($("inMatterPriority").value),
       matter_enabled: $("selMatterEnabled").value === "1",
-      bpm_rate_min: $("selBpmMin").value,
-      bpm_rate_max: $("selBpmMax").value,
+      bpm_rate_min: BPM_STEPS[Number($("rngBpmLo").value)],
+      bpm_rate_max: BPM_STEPS[Number($("rngBpmHi").value)],
       bpm_rate_decay: Number($("rngBpmDecay").value),
-      intensity: Number($("rngIntensity").value) / 100,
-      drop_hold_seconds: Number($("rngDropHold").value),
+      style: $("selStyle").value,
+      silence_gate: $("chkSilenceGate").checked,
     };
     if ($("selMode").value === "unicast" || $("selMatterMode").value === "unicast") {
       body.ip = $("inIp").value.trim();
     }
-    if (!$("selDevice").disabled) body.device = $("selDevice").value;
+    if (!$("selDevice").disabled) {
+      body.device = $("selDevice").value;
+      body.input_channel = $("selInputChannel").value;
+    }
     const r = await fetch("/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1231,8 +2391,7 @@ $("btnApply").onclick = async () => {
       $("selInterface").value = body.interface;
       if (body.ip !== undefined) $("inIp").value = body.ip;
       syncDecayLabel();
-      syncIntensityLabel();
-      syncDropHoldLabel();
+      syncBpmDivider();
       syncOutputLabels();
       if (!$("selDevice").disabled) currentDeviceHint = body.device;
     } else {
@@ -1286,6 +2445,7 @@ function connect() {
     if (s.meta) {
       if (!settingsInit) applyMetaToForm(s.meta, null);
       else $("meta").innerHTML = `${s.meta.source}<br>${s.meta.artnet}<br>${s.meta.matter || ""}`;
+      applySidecarNote(s.meta.matter_sidecar);
     }
     update(s);
   };
@@ -1306,9 +2466,11 @@ function escapeHtml(value) {
 }
 
 function syncMatterTypeFields() {
-  const rgb = $("matterType").value === "rgb";
-  $("lblMatterCh").hidden = rgb;
+  const type = $("matterType").value;
+  const rgb = type === "rgb";
+  $("lblMatterCh").hidden = rgb || type === "output";
   $("rgbMatterChannels").hidden = !rgb;
+  $("lblMatterChText").textContent = type === "dimmer" ? "Intensity ch" : "DMX channel";
 }
 $("matterType").onchange = syncMatterTypeFields;
 syncMatterTypeFields();
@@ -1331,9 +2493,20 @@ function renderMatterDevice(device) {
     : device.status?.qrDataUrl
       ? `<img src="${device.status.qrDataUrl}" alt="Matter QR"><div class="settings-note">${escapeHtml(device.status.manualPairingCode || "")}</div>`
       : `<p class="settings-note">QR unavailable</p>`;
-  const ch = device.type === "onoff"
-    ? `ch ${device.channels.channel}`
-    : `I${device.channels.intensity} R${device.channels.red} G${device.channels.green} B${device.channels.blue}`;
+  const typeLabel = device.type === "rgb"
+    ? "RGB"
+    : device.type === "dimmer"
+      ? "Dimmer"
+      : device.type === "output"
+        ? "Output"
+        : "Switch";
+  const ch = device.type === "output"
+    ? "companion output toggle"
+    : device.type === "onoff"
+      ? `ch ${device.channels.channel}`
+      : device.type === "dimmer"
+        ? `I${device.channels.intensity}`
+        : `I${device.channels.intensity} R${device.channels.red} G${device.channels.green} B${device.channels.blue}`;
   const el = document.createElement("article");
   el.className = "matter-device";
   el.dataset.id = device.id;
@@ -1341,7 +2514,7 @@ function renderMatterDevice(device) {
     <div style="flex:1">
       <h3>${escapeHtml(device.name)}
         <span class="badge ${commissioned ? "ok" : "warn"}">${commissioned ? "Commissioned" : "Awaiting pair"}</span>
-        <span class="badge">${device.type === "rgb" ? "RGB" : "On/Off"}</span>
+        <span class="badge">${typeLabel}</span>
       </h3>
       <div class="meta">${ch} · Matter UDP ${device.matterPort}</div>
       <div class="matter-actions">
@@ -1359,7 +2532,7 @@ async function refreshMatterDevices() {
     const { devices } = await matterApi("devices");
     list.innerHTML = "";
     if (!devices.length) {
-      list.innerHTML = `<p class="settings-note">No Matter devices yet. Create one above; it uses the Matter → MagicQ universe from Settings.</p>`;
+      list.innerHTML = `<p class="settings-note">No Matter devices yet. Create one above; it uses the Matter → MagicQ universe in this window.</p>`;
       return;
     }
     for (const device of devices) list.appendChild(renderMatterDevice(device));
@@ -1371,11 +2544,14 @@ async function refreshMatterDevices() {
 $("matterCreate").addEventListener("submit", async (event) => {
   event.preventDefault();
   const note = $("matterNote");
+  note.dataset.user = "1";
   note.className = "settings-note";
   note.textContent = "creating…";
   const type = $("matterType").value;
   const body = { type, name: $("matterName").value };
-  if (type === "onoff") body.channel = Number($("matterChannel").value);
+  if (type === "output") { /* no DMX channels: it drives the Output toggle */ }
+  else if (type === "onoff") body.channel = Number($("matterChannel").value);
+  else if (type === "dimmer") body.intensityChannel = Number($("matterChannel").value);
   else {
     body.intensityChannel = Number($("matterI").value);
     body.redChannel = Number($("matterR").value);
@@ -1408,6 +2584,7 @@ $("matterList").addEventListener("click", async (event) => {
     }
     await refreshMatterDevices();
   } catch (err) {
+    $("matterNote").dataset.user = "1";
     $("matterNote").className = "settings-note err";
     $("matterNote").textContent = err.message;
   }

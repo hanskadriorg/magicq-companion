@@ -1,14 +1,11 @@
-import { DeviceTypeId, Endpoint, ServerNode, VendorId } from "@matter/main";
+import { DeviceTypeId, Endpoint, ServerNode } from "@matter/main";
 import { ColorControlServer } from "@matter/main/behaviors/color-control";
 import { ColorControl } from "@matter/main/clusters/color-control";
 import { ExtendedColorLightDevice } from "@matter/main/devices/extended-color-light";
 import { matterHsvToRgb, matterLevelToDmx, matterXyToRgb } from "../color.js";
 import { bindDeviceRecord, setDeviceChannels } from "../dmxOutput.js";
 import type { DeviceRecord, RgbChannels } from "../types.js";
-
-const VENDOR_NAME = "Suvaline";
-const VENDOR_ID = 0xfff1;
-const PRODUCT_ID = 0x8002;
+import { PRODUCT_IDS, basicInformation } from "./identity.js";
 
 const ColorLight = ExtendedColorLightDevice.with(
   ColorControlServer.with("HueSaturation", "Xy", "ColorTemperature").alter({
@@ -91,16 +88,7 @@ export async function createColorServerNode(
       name: device.name,
       deviceType: DeviceTypeId(ExtendedColorLightDevice.deviceType),
     },
-    basicInformation: {
-      vendorName: VENDOR_NAME,
-      vendorId: VendorId(VENDOR_ID),
-      nodeLabel: device.name,
-      productName: device.name,
-      productLabel: device.name,
-      productId: PRODUCT_ID,
-      serialNumber: `maa-${device.id.slice(0, 16)}`,
-      uniqueId: device.uniqueId,
-    },
+    basicInformation: basicInformation(device, PRODUCT_IDS.rgb),
   });
 
   const endpoint = new Endpoint(ColorLight, {

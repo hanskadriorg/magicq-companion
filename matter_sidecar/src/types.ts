@@ -1,8 +1,16 @@
-export type DeviceType = "onoff" | "rgb";
+/**
+ * "output" is not a DMX fixture: it is a Matter plug whose on/off state
+ * drives the companion's own Art-Net/sACN output toggle.
+ */
+export type DeviceType = "onoff" | "dimmer" | "rgb" | "output";
 export type OutputProtocol = "artnet" | "sacn";
 
 export interface OnOffChannels {
   channel: number;
+}
+
+export interface DimmerChannels {
+  intensity: number;
 }
 
 export interface RgbChannels {
@@ -23,7 +31,7 @@ export interface DeviceRecord {
   /** Unicast destination IP (ignored when broadcast=true for Art-Net; optional override for sACN unicast). */
   artnetHost: string;
   universe: number;
-  channels: OnOffChannels | RgbChannels;
+  channels: OnOffChannels | DimmerChannels | RgbChannels;
   matterPort: number;
   passcode: number;
   discriminator: number;
@@ -46,6 +54,19 @@ export interface CreateOnOffDeviceInput {
   artnetHost: string;
   universe: number;
   channel: number;
+}
+
+export interface CreateDimmerDeviceInput {
+  name: string;
+  protocol?: OutputProtocol;
+  broadcast?: boolean;
+  artnetHost: string;
+  universe: number;
+  intensityChannel: number;
+}
+
+export interface CreateOutputSwitchInput {
+  name: string;
 }
 
 export interface CreateRgbDeviceInput {
@@ -85,11 +106,21 @@ export interface DeviceView extends DeviceRecord {
   status: DeviceStatus;
 }
 
-export function isOnOffChannels(channels: OnOffChannels | RgbChannels): channels is OnOffChannels {
+export function isOnOffChannels(
+  channels: OnOffChannels | DimmerChannels | RgbChannels,
+): channels is OnOffChannels {
   return "channel" in channels;
 }
 
-export function isRgbChannels(channels: OnOffChannels | RgbChannels): channels is RgbChannels {
+export function isDimmerChannels(
+  channels: OnOffChannels | DimmerChannels | RgbChannels,
+): channels is DimmerChannels {
+  return "intensity" in channels && !("red" in channels);
+}
+
+export function isRgbChannels(
+  channels: OnOffChannels | DimmerChannels | RgbChannels,
+): channels is RgbChannels {
   return "red" in channels && "green" in channels && "blue" in channels && "intensity" in channels;
 }
 

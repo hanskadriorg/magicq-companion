@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { randomInt } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import type {
+  CreateDimmerDeviceInput,
   CreateOnOffDeviceInput,
+  CreateOutputSwitchInput,
   CreateRgbDeviceInput,
   DeviceRecord,
   OutputProtocol,
@@ -169,6 +171,57 @@ export async function createOnOffDevice(input: CreateOnOffDeviceInput): Promise<
   return device;
 }
 
+export async function createDimmerDevice(input: CreateDimmerDeviceInput): Promise<DeviceRecord> {
+  const store = await readStore();
+  const now = new Date().toISOString();
+  const protocol = validateProtocol(input.protocol);
+  const broadcast = Boolean(input.broadcast);
+  const device: DeviceRecord = {
+    id: uuidv4(),
+    name: validateName(input.name),
+    type: "dimmer",
+    protocol,
+    broadcast,
+    artnetHost: validateHost(input.artnetHost, broadcast),
+    universe: validateUniverse(input.universe, protocol),
+    channels: { intensity: validateChannel(input.intensityChannel, "intensityChannel") },
+    matterPort: allocatePort(store.devices),
+    passcode: randomPasscode(),
+    discriminator: randomDiscriminator(),
+    uniqueId: uuidv4().replace(/-/g, "").slice(0, 32),
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.devices.push(device);
+  await writeStore(store);
+  return device;
+}
+
+/** A switch for the companion's own output: no universe, no DMX channels. */
+export async function createOutputSwitch(input: CreateOutputSwitchInput): Promise<DeviceRecord> {
+  const store = await readStore();
+  const now = new Date().toISOString();
+  const device: DeviceRecord = {
+    id: uuidv4(),
+    name: validateName(input.name),
+    type: "output",
+    protocol: "artnet",
+    broadcast: true,
+    artnetHost: "255.255.255.255",
+    universe: 0,
+    channels: { channel: 1 },
+    matterPort: allocatePort(store.devices),
+    passcode: randomPasscode(),
+    discriminator: randomDiscriminator(),
+    uniqueId: uuidv4().replace(/-/g, "").slice(0, 32),
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.devices.push(device);
+  await writeStore(store);
+  return device;
+}
+
 export async function createRgbDevice(input: CreateRgbDeviceInput): Promise<DeviceRecord> {
   const store = await readStore();
   const now = new Date().toISOString();
@@ -227,12 +280,21 @@ export async function updateDevice(id: string, input: UpdateDeviceInput): Promis
     updatedAt: new Date().toISOString(),
   };
 
-  if (updated.type === "onoff") {
+  if (updated.type === "output") {
+    updated.channels = current.channels;
+  } else if (updated.type === "onoff") {
     const channel =
       input.channel !== undefined
         ? validateChannel(input.channel, "channel")
         : (current.channels as { channel: number }).channel;
     updated.channels = { channel };
+  } else if (updated.type === "dimmer") {
+    const prev = current.channels as { intensity?: number; channel?: number };
+    const intensity =
+      input.intensityChannel !== undefined
+        ? validateChannel(input.intensityChannel, "intensityChannel")
+        : (prev.intensity ?? prev.channel ?? 1);
+    updated.channels = { intensity };
   } else {
     const prev = current.channels as {
       intensity: number;

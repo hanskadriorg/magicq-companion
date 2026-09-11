@@ -40,7 +40,12 @@ class Bridge:
         hop = cfg.audio.blocksize
         self.dt = hop / sr
         self.extractor = FeatureExtractor(
-            sr, hop, cfg.detection, cfg.build_score, cfg.bpm_rate
+            sr,
+            hop,
+            cfg.detection,
+            cfg.build_score,
+            cfg.bpm_rate,
+            noise_floor_db=cfg.audio.noise_floor_db,
         )
         self.tracker = SectionTracker(cfg.detection, self.extractor.fps)
         self.dmx = bytearray(512)
@@ -51,6 +56,10 @@ class Bridge:
         self.enabled = True
         # Analyzer gate: skip feature/section work; UI server stays up.
         self.analyzing = True
+        # Music gate: False after a long stretch of hiss/silence.
+        self.signal_live = True
+        self.quiet_s = 0.0
+        self._music_s = 0.0
         self._was_sending = True
 
     def run(
@@ -66,8 +75,9 @@ class Bridge:
                 # Always consume audio so capture doesn't back up / block.
                 if self.analyzing:
                     self.features = self.extractor.process(block)
-                    if self.enabled:
-                        self.tracker.update(self.features, self.dt)
+                    self._update_signal_gate(self.features)
+                    self.tracker.update(self.features, self.dt)
+                    if self.enabled and self.signal_live:
                         build_frame(
                             self.dmx,
                             self.cfg.channels,
@@ -79,7 +89,7 @@ class Bridge:
                 else:
                     self.dmx[:] = b"\x00" * len(self.dmx)
 
-                sending = self.analyzing and self.enabled
+                sending = self.analyzing and self.enabled and self.signal_live
                 if self.sender is not None and i % send_every == 0:
                     if sending:
                         self.sender.send(self.dmx)
@@ -103,3 +113,31 @@ class Bridge:
             if self.sender is not None:
                 self.sender.blackout()
                 self.sender.close()
+
+    def _update_signal_gate(self, features: Features) -> None:
+        det = self.cfg.detection
+        if not bool(getattr(det, "silence_gate", True)):
+            self.signal_live = True
+            self.quiet_s = 0.0
+            self._music_s = 0.0
+            return
+        if self.t < 20.0:
+            self.signal_live = True
+            return
+        timeout = max(30.0, float(getattr(det, "silence_timeout_seconds", 600.0)))
+        music = float(getattr(features, "music_score", 0.0))
+        if music < 0.28:
+            self.quiet_s += self.dt
+            self._music_s = 0.0
+        else:
+            self.quiet_s = max(0.0, self.quiet_s - 2.0 * self.dt)
+            if music > 0.42:
+                self._music_s += self.dt
+            else:
+                self._music_s = 0.0
+        if self.signal_live:
+            if self.quiet_s >= timeout:
+                self.signal_live = False
+        elif self._music_s >= 1.5:
+            self.signal_live = True
+            self.quiet_s = 0.0

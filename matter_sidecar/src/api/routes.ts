@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { deviceManager } from "../matter/deviceManager.js";
 import {
+  createDimmerDevice,
   createOnOffDevice,
+  createOutputSwitch,
   createRgbDevice,
   deleteDevice,
   getDevice,
@@ -21,6 +23,16 @@ async function toView(id: string): Promise<DeviceView | undefined> {
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/health", async () => ({ ok: true }));
+
+  // Python calls this when the dashboard output toggle moves, so a paired
+  // companion-output switch shows the right position in the phone app.
+  app.post<{ Body: { enabled?: boolean } }>("/api/output", async (req, reply) => {
+    if (typeof req.body?.enabled !== "boolean") {
+      return reply.code(400).send({ error: "enabled must be a boolean" });
+    }
+    await deviceManager.syncOutputSwitches(req.body.enabled);
+    return { ok: true };
+  });
 
   app.get("/api/devices", async () => {
     const devices = await listDevices();
@@ -44,7 +56,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{
     Body: {
-      type: "onoff" | "rgb";
+      type: "onoff" | "dimmer" | "rgb" | "output";
       name: string;
       protocol?: OutputProtocol;
       broadcast?: boolean;
@@ -74,13 +86,24 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       };
 
       let device;
-      if (body.type === "onoff") {
+      if (body.type === "output") {
+        device = await createOutputSwitch({ name: body.name });
+      } else if (body.type === "onoff") {
         if (body.channel === undefined) {
           return reply.code(400).send({ error: "channel is required for onoff devices" });
         }
         device = await createOnOffDevice({
           ...common,
           channel: Number(body.channel),
+        });
+      } else if (body.type === "dimmer") {
+        const intensityChannel = body.intensityChannel ?? body.channel;
+        if (intensityChannel === undefined) {
+          return reply.code(400).send({ error: "intensityChannel is required for dimmer devices" });
+        }
+        device = await createDimmerDevice({
+          ...common,
+          intensityChannel: Number(intensityChannel),
         });
       } else if (body.type === "rgb") {
         const { intensityChannel, redChannel, greenChannel, blueChannel } = body;
@@ -102,7 +125,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
           blueChannel: Number(blueChannel),
         });
       } else {
-        return reply.code(400).send({ error: "type must be onoff or rgb" });
+        return reply.code(400).send({ error: "type must be onoff, dimmer, rgb, or output" });
       }
 
       try {

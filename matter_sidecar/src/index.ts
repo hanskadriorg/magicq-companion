@@ -19,14 +19,15 @@ function configureMatterNetworking(): void {
   if (process.env.MATTER_MDNS_IPV4 !== "0") {
     Environment.default.vars.set("mdns.ipv4", true);
   }
+  // Tailscale/IPv6 addresses on the same host confuse SMART+ rediscovery.
+  if (process.env.MATTER_MDNS_IPV6 !== "1") {
+    Environment.default.vars.set("mdns.ipv6", false);
+  }
 }
 
 async function main(): Promise<void> {
   configureMatterNetworking();
   console.log(`[bridge] data directory: ${DATA_DIR}`);
-
-  const devices = await listDevices();
-  await deviceManager.startAll(devices);
 
   const app = Fastify({ logger: false });
   app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {
@@ -48,9 +49,22 @@ async function main(): Promise<void> {
 
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("uncaughtException", (err) => {
+    console.error("[bridge] uncaught exception (sidecar stays up):", err);
+  });
+  process.on("unhandledRejection", (err) => {
+    console.error("[bridge] unhandled rejection (sidecar stays up):", err);
+  });
 
   await app.listen({ host: HOST, port: PORT });
   console.log(`[bridge] Matter API listening on http://${HOST}:${PORT}`);
+
+  try {
+    const devices = await listDevices();
+    await deviceManager.startAll(devices);
+  } catch (err) {
+    console.error("[bridge] failed to start stored Matter nodes (API stays up):", err);
+  }
 }
 
 main().catch((err) => {

@@ -83,26 +83,11 @@ def build_source(args: argparse.Namespace, cfg: Config):
     # USB interfaces often show up in PipeWire but not PortAudio. Prefer
     # pw-record when the configured name matches a PipeWire source; otherwise
     # use sounddevice, and fall back to pw-record if PortAudio can't see it.
-    from .audio import (
-        capture_blocks,
-        capture_blocks_subprocess,
-        find_device,
-        pipewire_source_available,
+    from .audio import open_capture
+
+    return open_capture(
+        sr, hop, cfg.audio.device, cfg.audio.input_channel or "left"
     )
-
-    label = cfg.audio.device or "default device"
-
-    if pipewire_source_available(cfg.audio.device):
-        blocks = capture_blocks_subprocess(sr, hop, cfg.audio.device)
-        return blocks, f"live input via pw-record ({label})"
-
-    try:
-        device = find_device(cfg.audio.device)
-        blocks = capture_blocks(sr, hop, device)
-        return blocks, f"live input ({label})"
-    except (OSError, ValueError):
-        blocks = capture_blocks_subprocess(sr, hop, cfg.audio.device)
-        return blocks, f"live input via pw-record/arecord ({label})"
 
 
 def main() -> int:

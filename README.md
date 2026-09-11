@@ -32,24 +32,17 @@ One Art-Net universe (default: universe 0) with these channels:
 | 4      | drop           | 255 for ~16 s after the drop hits                            |
 | 5      | build_progress | Ramps 0 to 255 during a build-up, slams to 255 on the drop   |
 | 6      | beat_pulse     | Toggles 0↔255 on every kick (hard edges for MagicQ BPM)      |
-| 7      | energy         | Loudness vs. the recent average (128 = normal level)         |
-| 8      | kick           | Bass-band envelope follower (like a smarter 63 Hz trigger)   |
 | 9      | drop_hit       | 255 for ~150 ms only at the instant the drop starts          |
-| 10     | melody         | 0–255 when kick continues but mid/high (pads/leads) dominate |
-| 11     | four_four      | 255 pulse on each 4/4 quarter note (grid-locked chase sync)  |
-| 12     | centroid       | Spectral centroid — dark/bass-heavy → bright/trebly          |
-| 13     | tilt           | (mid+high)/bass — how open the mix is vs the kick            |
+| 11     | four_four      | 255 while a 4/4 kick grid is locked, 0 when it isn’t         |
 | 14     | bpm_rate       | 255/128/64/32 = full/½/¼/⅛ BPM chase rate (by energy)       |
 
 Exactly one of channels 1-4 is at 255 at any time. Channel 9 is a
 one-shot impact trigger (strobe / cue / macro); channel 4 holds the
-drop look for the full hold time. Channel 10 rises when the track gets
-more melodic without dropping the kick. Channel 11 is a phase-locked
-4/4 metronome (steadier than channel 6’s raw kick pulse). Channels
-12–13 describe brightness/texture; channel 14 picks a tempo divisor
-from energy (range + decay hold are set in the UI / `[bpm_rate]` in
-`config.toml`) and crossfades in 0.25 s. Channel numbers are
-configurable in `config.toml`.
+drop look for the full hold time. Channel 11 is a lock flag that stays
+at 255 while a regular 4/4 kick grid is held (not a metronome pulse).
+Channel 14 picks a tempo divisor from energy (range + decay hold are
+set in the UI / `[bpm_rate]` in `config.toml`) and snaps between
+32/64/128/255. Channel numbers are configurable in `config.toml`.
 
 The dashboard also has **analyzer on/off**, **output on/off** (audio Art-Net
 blackout), Matter device pairing QR codes, a **build/drop intensity** slider,
@@ -58,13 +51,16 @@ Raspberry Pi installs.
 
 ## Matter devices
 
-Create On/Off or On/Off+RGB Matter nodes in the dashboard, then scan the QR
-in Apple Home / Google Home / etc. Channel mapping:
+Create Switch, Dimmer, RGB fixture, or Companion-output Matter nodes in the
+dashboard, then scan the QR in Apple Home / Google Home / OSRAM SMART+.
+Matter is LAN-only unless a hub on this network stays in the fabric.
 
 | Device type | Matter clusters | DMX channels |
 |-------------|-----------------|--------------|
-| On / Off | OnOff | 1 channel: `0` off / `255` on |
-| On / Off + RGB | OnOff + LevelControl + ColorControl | Intensity, R, G, B |
+| Switch | OnOff | 1 channel: `0` off / `255` on |
+| Dimmer | OnOff + LevelControl | 1 intensity channel `0`–`255` |
+| RGB fixture | OnOff + LevelControl + ColorControl | Intensity, R, G, B |
+| Companion output | OnOff plug | Toggles this unit's Art-Net/sACN output |
 
 All Matter fixtures share the **Matter → MagicQ** protocol/universe from
 Settings. Pairing identities live in `data/matter/`. Matter mDNS is bound to
@@ -197,9 +193,9 @@ To watch logs or the console output: `docker compose logs -f`.
 
 `--ui` serves a live dashboard (default port 8765, change with
 `--ui-port`). It shows the current section, BPM with a beat indicator,
-energy/kick/build/ramp meters, a 60-second energy timeline colored by
-detected section, the outgoing DMX channel values, and a log of section
-transitions. It is reachable from other machines on the network too
+a 60-second energy timeline colored by detected section, and
+build/music/divider/ramp meters in one live panel, plus the outgoing DMX
+channel values and a log of section transitions. It is reachable from other machines on the network too
 (e.g. a tablet at FOH: `http://<pc-ip>:8765`).
 
 The **Settings** panel at the top lets you pick the audio input device,

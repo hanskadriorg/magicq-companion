@@ -30,6 +30,8 @@ class ArtNetConfig:
     fps: int = 40
     # sACN packet priority (0–200). Higher wins when multiple sources collide.
     priority: int = 100
+    # Dashboard Art-Net/sACN output switch. Persisted across restarts.
+    enabled: bool = True
 
 
 @dataclass
@@ -45,11 +47,28 @@ class MatterConfig:
     priority: int = 100
 
 
+INPUT_CHANNEL_CHOICES = ("left", "right", "both")
+
+
+def coerce_input_channel(value: object) -> str:
+    raw = str(value or "left").strip().lower()
+    if raw in ("r", "right", "2"):
+        return "right"
+    if raw in ("both", "stereo", "mix", "lr", "l+r"):
+        return "both"
+    return "left"
+
+
 @dataclass
 class AudioConfig:
     samplerate: int = 44100
     blocksize: int = 512
     device: str = ""
+    # Which captured channel(s) to analyse: left | right | both (average).
+    input_channel: str = "left"
+    # Everything quieter than this counts as noise, not music. Set it just
+    # above the hiss you see on the dashboard input meter with the DJ paused.
+    noise_floor_db: float = -55.0
 
 
 @dataclass
@@ -60,18 +79,10 @@ class ChannelMap:
     drop: int = 4
     build_progress: int = 5
     beat_pulse: int = 6
-    energy: int = 7
-    kick: int = 8
     # One-shot pulse at the moment DROP begins (for cue/macro triggers).
     drop_hit: int = 9
-    # Continuous 0-255: kick still going, focus on mid/high (melody/pads).
-    melody: int = 10
-    # 4/4 quarter-note grid pulse (phase-locked; keeps ticking if a kick is missed).
+    # 255 while a 4/4 kick grid is locked in the music (else 0).
     four_four: int = 11
-    # Spectral centroid (dark/bass-heavy → bright/trebly), 0-255.
-    centroid: int = 12
-    # (mid+high)/bass tilt — higher = more open/bright relative to the kick.
-    tilt: int = 13
     # Chase rate vs BPM: 255=full, 128=half, 64=quarter, 32=eighth (energy-picked).
     bpm_rate: int = 14
 
@@ -88,28 +99,125 @@ class DetectionConfig:
     expected_build_seconds: float = 12.0
     drop_energy_jump: float = 1.35
     baseline_seconds: float = 45.0
-    # 0 = groove-oriented (harder builds/drops), 1 = aggressive (easier).
-    intensity: float = 0.55
+    # 0 = groove-oriented (harder), 1 = aggressive (easier). Independent.
+    build_intensity: float = 0.55
+    drop_intensity: float = 0.55
+    # Seconds BUILDUP can sit below the build threshold before falling back.
+    build_decay_seconds: float = 8.0
+    # Fast drop: energy must rise by drop_rise within drop_rise_window seconds.
+    drop_rise_window: float = 0.5
+    drop_rise: float = 0.40
+    # Minimum bass_norm at the hit (1.0 = recent average kick level).
+    drop_min_bass: float = 0.70
+    # How long we must already be in the current section (0 = immediate).
+    drop_min_state_seconds: float = 0.15
+    # Energy/bass smoothing for drop sensing (smaller = faster, twitchier).
+    drop_smooth_seconds: float = 0.08
+    # Allow a drop hit while still labelled GROOVE (short/no build).
+    drop_from_groove: bool = True
+    # Also fire on a spectral-flux "onset" spike with bass (same family as
+    # librosa onset strength, computed live each hop — no extra library).
+    drop_use_onset: bool = True
+    # 0 = stricter 4/4 lock, 1 = locks on a sloppier / shorter kick run.
+    four_four_intensity: float = 0.55
+    # Seconds the 4/4 must hold before channel 11 goes 255, and stay 255
+    # after the grid slips. 0 = follow the lock immediately.
+    four_four_smooth_seconds: float = 0.4
+    # 0 = needs a long kick-out, 1 = breakdown on a shorter gap / weaker bass.
+    breakdown_intensity: float = 0.55
+    # Beats of missing kick before a breakdown cue (style still scales this).
+    breakdown_beats: float = 4.0
+    # Arrangement style: auto | club | long_build | punchy | breakdown
+    style: str = "auto"
+    # Blackout Art-Net/sACN (and Matter DMX) after this long with no music.
+    silence_gate: bool = True
+    silence_timeout_seconds: float = 600.0
+
+
+STYLE_NAMES = ("auto", "club", "long_build", "punchy", "breakdown")
+
+# Biases applied on top of the user's intensity / decay sliders. These are
+# deliberately far apart: "punchy" reacts in about a third of the time that
+# "long_build" takes, so switching style is audible on the lights.
+STYLE_PROFILES = {
+    "club": {
+        "build_threshold_mul": 1.00,
+        "build_decay_mul": 1.00,
+        "drop_jump_mul": 1.00,
+        "drop_intensity_add": 0.00,
+        "breakdown_beats": 4.0,
+        "evidence_mul": 1.00,
+        "dwell_mul": 1.00,
+        "breakdown_dwell_mul": 0.45,
+        "expected_build_mul": 1.00,
+        "drop_hold_mul": 1.00,
+        "drop_rise_mul": 1.00,
+        "kick_absent_mul": 1.00,
+    },
+    "long_build": {
+        "build_threshold_mul": 0.52,
+        "build_decay_mul": 2.40,
+        "drop_jump_mul": 1.18,
+        "drop_intensity_add": 0.00,
+        "breakdown_beats": 8.0,
+        "evidence_mul": 1.70,
+        "dwell_mul": 1.80,
+        "breakdown_dwell_mul": 0.90,
+        "expected_build_mul": 2.20,
+        "drop_hold_mul": 1.45,
+        "drop_rise_mul": 1.25,
+        "kick_absent_mul": 1.10,
+    },
+    "punchy": {
+        "build_threshold_mul": 1.45,
+        "build_decay_mul": 0.35,
+        "drop_jump_mul": 0.62,
+        "drop_intensity_add": 0.22,
+        "breakdown_beats": 2.0,
+        "evidence_mul": 0.32,
+        "dwell_mul": 0.28,
+        "breakdown_dwell_mul": 0.18,
+        "expected_build_mul": 0.45,
+        "drop_hold_mul": 0.55,
+        "drop_rise_mul": 0.62,
+        "kick_absent_mul": 0.75,
+    },
+    # Prefer atmospheric / kick-out over a 4/4 groove.
+    "breakdown": {
+        "build_threshold_mul": 1.18,
+        "build_decay_mul": 0.70,
+        "drop_jump_mul": 1.05,
+        "drop_intensity_add": 0.00,
+        "breakdown_beats": 1.5,
+        "evidence_mul": 0.80,
+        "dwell_mul": 0.50,
+        "breakdown_dwell_mul": 0.12,
+        "expected_build_mul": 0.80,
+        "drop_hold_mul": 0.90,
+        "drop_rise_mul": 1.00,
+        "kick_absent_mul": 1.35,
+        "breakdown_need_mul": 0.22,
+        "groove_return_mul": 2.40,
+        "fizzle_to": "breakdown",
+    },
+}
 
 
 @dataclass
 class BuildScoreConfig:
     # Slope cues (classic rising tension).
-    weight_energy: float = 0.22
-    weight_treble: float = 0.16
+    weight_energy: float = 0.24
+    weight_treble: float = 0.20
     weight_onsets: float = 0.16
-    # Brightness opening (centroid / spectral tilt).
-    weight_brightness: float = 0.14
     # Level lift vs earlier in the window (slow techno filter builds).
-    weight_lift: float = 0.16
+    weight_lift: float = 0.20
     # Highs rising while kick stays flat/falling (filter-open builds).
-    weight_divergence: float = 0.10
+    weight_divergence: float = 0.12
     # Busy hats / spectral activity above the recent baseline.
-    weight_activity: float = 0.06
+    weight_activity: float = 0.08
     full_scale_energy_slope: float = 0.04
     full_scale_treble_slope: float = 0.05
     full_scale_onset_slope: float = 0.8
-    full_scale_brightness_slope: float = 0.04
     full_scale_lift: float = 0.18
     full_scale_activity: float = 2.5
 
@@ -124,6 +232,24 @@ BPM_RATE_NAME_TO_LEVEL = {
 }
 
 
+VISUALIZER_MODES = ("auto", "absolute", "level")
+
+
+def coerce_visualizer_mode(value: object) -> str:
+    name = str(value or "auto").strip().lower()
+    return name if name in VISUALIZER_MODES else "auto"
+
+
+@dataclass
+class UiConfig:
+    """Dashboard options that also change what the Pi computes."""
+
+    # When false, the Pi skips the spectrum visualiser (saves CPU/RAM).
+    visualizer: bool = True
+    # auto = autoranged bars, absolute = fixed dBFS scale, level = input scope.
+    visualizer_mode: str = "auto"
+
+
 @dataclass
 class BpmRateConfig:
     """How energy maps onto DMX channel 14 (bpm_rate)."""
@@ -133,7 +259,7 @@ class BpmRateConfig:
     min: str = "eighth"
     max: str = "full"
     # Extra seconds to hold a higher rate before stepping down.
-    decay_seconds: float = 0.0
+    decay_seconds: float = 3.0
 
 
 @dataclass
@@ -146,6 +272,7 @@ class Config:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     build_score: BuildScoreConfig = field(default_factory=BuildScoreConfig)
     bpm_rate: BpmRateConfig = field(default_factory=BpmRateConfig)
+    ui: UiConfig = field(default_factory=UiConfig)
 
 
 _SECTIONS = {
@@ -157,6 +284,21 @@ _SECTIONS = {
     "detection": DetectionConfig,
     "build_score": BuildScoreConfig,
     "bpm_rate": BpmRateConfig,
+    "ui": UiConfig,
+}
+
+
+# Keys that older config.toml files may still carry. They are read and
+# ignored so an in-place upgrade never fails to start.
+_RETIRED_KEYS = {
+    ("detection", "intensity"),
+    ("channels", "centroid"),
+    ("channels", "tilt"),
+    ("channels", "energy"),
+    ("channels", "kick"),
+    ("channels", "melody"),
+    ("build_score", "weight_brightness"),
+    ("build_score", "full_scale_brightness_slope"),
 }
 
 
@@ -174,12 +316,87 @@ def load_config(path: str | Path | None) -> Config:
         section_data = data.get(section_name, {})
         target = getattr(cfg, section_name)
         for key, value in section_data.items():
+            if (section_name, key) in _RETIRED_KEYS:
+                continue
             if hasattr(target, key):
                 setattr(target, key, value)
             else:
                 raise ValueError(f"Unknown config key: [{section_name}] {key}")
+    _migrate_legacy_intensity(cfg, data.get("detection", {}))
     _sync_shared_network(cfg)
+    cfg.audio.input_channel = coerce_input_channel(cfg.audio.input_channel)
+    cfg.audio.noise_floor_db = clamp_noise_floor(cfg.audio.noise_floor_db)
+    cfg.ui.visualizer = bool(cfg.ui.visualizer)
+    cfg.ui.visualizer_mode = coerce_visualizer_mode(cfg.ui.visualizer_mode)
+    cfg.detection.style = coerce_style(cfg.detection.style)
+    cfg.detection.silence_gate = bool(cfg.detection.silence_gate)
+    cfg.detection.silence_timeout_seconds = max(
+        30.0, float(cfg.detection.silence_timeout_seconds)
+    )
+    try:
+        cfg.detection.four_four_intensity = max(
+            0.0, min(1.0, float(cfg.detection.four_four_intensity))
+        )
+    except (TypeError, ValueError):
+        cfg.detection.four_four_intensity = 0.55
+    try:
+        cfg.detection.four_four_smooth_seconds = max(
+            0.0, min(30.0, float(cfg.detection.four_four_smooth_seconds))
+        )
+    except (TypeError, ValueError):
+        cfg.detection.four_four_smooth_seconds = 0.4
+    try:
+        cfg.detection.breakdown_intensity = max(
+            0.0, min(1.0, float(cfg.detection.breakdown_intensity))
+        )
+    except (TypeError, ValueError):
+        cfg.detection.breakdown_intensity = 0.55
+    try:
+        cfg.detection.breakdown_beats = max(
+            1.0, min(16.0, float(cfg.detection.breakdown_beats))
+        )
+    except (TypeError, ValueError):
+        cfg.detection.breakdown_beats = 4.0
     return cfg
+
+
+NOISE_FLOOR_RANGE = (-90.0, -20.0)
+
+
+def clamp_noise_floor(value: object) -> float:
+    lo, hi = NOISE_FLOOR_RANGE
+    try:
+        db = float(value)
+    except (TypeError, ValueError):
+        return -55.0
+    return max(lo, min(hi, db))
+
+
+def coerce_style(value: str | None) -> str:
+    name = str(value or "auto").strip().lower().replace("-", "_")
+    aliases = {
+        "4/4": "club",
+        "four_on_floor": "club",
+        "trance": "long_build",
+        "atmospheric": "breakdown",
+        "breakdown_first": "breakdown",
+    }
+    name = aliases.get(name, name)
+    return name if name in STYLE_NAMES else "auto"
+
+
+def _migrate_legacy_intensity(cfg: Config, section: dict) -> None:
+    """Copy the old shared [detection] intensity onto both sliders if needed."""
+    if "intensity" not in section:
+        return
+    try:
+        legacy = float(section["intensity"])
+    except (TypeError, ValueError):
+        return
+    if "build_intensity" not in section:
+        cfg.detection.build_intensity = legacy
+    if "drop_intensity" not in section:
+        cfg.detection.drop_intensity = legacy
 
 
 def _sync_shared_network(cfg: Config) -> None:

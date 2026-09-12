@@ -24,9 +24,17 @@ universe = 0
 fps = 40
 # sACN source priority (0–200). Higher wins if multiple sources share a universe.
 priority = 100
-# Dashboard output switch. Written when you toggle Output on/off so a
-# daytime reboot does not start sending again.
+# Live dashboard Output switch. Boot / process start uses [server] startup_output.
 enabled = true
+
+# Host defaults from the dashboard Server settings modal.
+# startup_output is the Output switch after Companion starts.
+# The live Output toggle does not change that.
+[server]
+startup_output = true
+reboot_enabled = false
+reboot_time = "14:00"
+reboot_days = ["mon", "tue", "wed", "thu", "fri"]
 
 # Matter lights → MagicQ on the SAME interface, optionally a different universe/protocol.
 [matter]

@@ -27,10 +27,13 @@ from .config import (
     audio_output_cfg,
     clamp_noise_floor,
     coerce_input_channel,
+    coerce_reboot_days,
     coerce_style,
     coerce_visualizer_mode,
     matter_output_cfg,
+    try_reboot_time,
 )
+from .schedule import apply_host_schedule
 from .matter_runtime import MatterOutput, MatterSidecar, describe_matter
 from .output import (
     OUTPUT_PROTOCOLS,
@@ -53,9 +56,10 @@ _DROP_SENSING_FIELDS = {
 }
 
 _BROADCAST_INTERVAL = 0.05  # 20 updates per second
-_LAYOUT_BOX_IDS = ("settings", "hero", "dmx", "log", "matter")
+_LAYOUT_BOX_IDS = ("settings", "hero", "dmx", "log", "matter", "gamepad")
 # Section changes kept for the dashboard log window.
 _SECTION_LOG_LIMIT = 200
+_SECTION_LOG_SECONDS = 180.0
 _HERO_PANES = ("head", "input", "spark", "meters")
 _DEFAULT_LAYOUT = {
     "sparkHeight": 90,
@@ -99,7 +103,8 @@ class _Manager:
         self.worker: threading.Thread | None = None
         self.stop_event = threading.Event()
         self.source_desc = "starting…"
-        self.enabled = bool(self.cfg.artnet.enabled)
+        self.enabled = bool(self.cfg.server.startup_output)
+        self.cfg.artnet.enabled = self.enabled
         self.analyzing = True
         self.visualizer = bool(self.cfg.ui.visualizer)
         self.layout = self._load_layout()
@@ -223,11 +228,9 @@ class _Manager:
         if section == self._log_section:
             return
         now = time.time()
-        previous = self._log_section
-        if previous is not None:
-            held = max(0.0, now - self._log_started)
-        else:
-            held = 0.0
+        if self.section_log:
+            last = self.section_log[-1]
+            last["held"] = round(max(0.0, now - float(last["ts"])), 1)
         self._log_section = section
         self._log_started = now
         self.log_seq += 1
@@ -236,17 +239,47 @@ class _Manager:
                 "seq": self.log_seq,
                 "ts": now,
                 "section": section,
-                "from": previous or "",
-                "held": round(held, 1),
+                "held": 0.0,
                 "bpm": round(b.features.bpm, 1),
                 "energy": round(b.features.energy_norm, 2),
                 "build": round(b.features.build_score, 2),
                 "level_db": round(b.features.rms_db, 1),
             }
         )
+        self._prune_section_log(now)
+
+    def _prune_section_log(self, now: float) -> None:
+        cutoff = now - _SECTION_LOG_SECONDS
+        kept: list[dict] = []
+        rows = list(self.section_log)
+        for i, row in enumerate(rows):
+            start = float(row.get("ts") or 0)
+            if i + 1 < len(rows):
+                end = start + float(row.get("held") or 0)
+            else:
+                end = now
+            if end >= cutoff:
+                kept.append(row)
+        if len(kept) != len(rows):
+            self.section_log.clear()
+            self.section_log.extend(kept)
 
     def sections(self) -> list[dict]:
-        return list(self.section_log)
+        now = time.time()
+        cutoff = now - _SECTION_LOG_SECONDS
+        items = list(self.section_log)
+        out: list[dict] = []
+        for i, row in enumerate(items):
+            rec = dict(row)
+            start = float(rec.get("ts") or 0)
+            current = i + 1 == len(items)
+            if current:
+                rec["held"] = round(max(0.0, now - start), 1)
+            rec["current"] = current
+            end = start + float(rec.get("held") or 0)
+            if end >= cutoff:
+                out.append(rec)
+        return out
 
     # ------------------------------------------------------------------
 
@@ -300,6 +333,10 @@ class _Manager:
             "style": self.cfg.detection.style,
             "silence_gate": bool(self.cfg.detection.silence_gate),
             "silence_timeout_seconds": self.cfg.detection.silence_timeout_seconds,
+            "startup_output": bool(self.cfg.server.startup_output),
+            "reboot_enabled": bool(self.cfg.server.reboot_enabled),
+            "reboot_time": self.cfg.server.reboot_time,
+            "reboot_days": list(self.cfg.server.reboot_days),
             "enabled": self.enabled,
             "analyzing": self.analyzing,
             "visualizer": self.visualizer,
@@ -516,6 +553,10 @@ class _Manager:
         breakdown_beats: float | None = None,
         drop_hit_seconds: float | None = None,
         drop_hit_fade_seconds: float | None = None,
+        startup_output: bool | None = None,
+        reboot_enabled: bool | None = None,
+        reboot_time: str | None = None,
+        reboot_days: list[str] | None = None,
     ) -> str:
         with self.ctl_lock:
             cfg = self.cfg
@@ -534,6 +575,14 @@ class _Manager:
             audio_changed = False
             matter_changed = False
             nic_changed = False
+            if interface is not None and str(interface).strip().lower() in (
+                "localhost",
+                "lo",
+                "127.0.0.1",
+            ):
+                interface = ""
+                mode = "localhost"
+                matter_mode = "localhost"
             if interface is not None and interface != cfg.network.interface:
                 cfg.network.interface = interface
                 cfg.artnet.interface = interface
@@ -632,11 +681,33 @@ class _Manager:
             if style is not None and style != cfg.detection.style:
                 cfg.detection.style = style
                 style_changed = True
+            silence_changed = False
             if silence_gate is not None and bool(silence_gate) != bool(
                 cfg.detection.silence_gate
             ):
                 cfg.detection.silence_gate = bool(silence_gate)
-                style_changed = True
+                silence_changed = True
+            server_changed = False
+            schedule_changed = False
+            if startup_output is not None and bool(startup_output) != bool(
+                cfg.server.startup_output
+            ):
+                cfg.server.startup_output = bool(startup_output)
+                server_changed = True
+            if reboot_enabled is not None and bool(reboot_enabled) != bool(
+                cfg.server.reboot_enabled
+            ):
+                cfg.server.reboot_enabled = bool(reboot_enabled)
+                server_changed = True
+                schedule_changed = True
+            if reboot_time is not None and reboot_time != cfg.server.reboot_time:
+                cfg.server.reboot_time = reboot_time
+                server_changed = True
+                schedule_changed = True
+            if reboot_days is not None and list(reboot_days) != list(cfg.server.reboot_days):
+                cfg.server.reboot_days = list(reboot_days)
+                server_changed = True
+                schedule_changed = True
             four_four_changed = False
             if (
                 four_four_intensity is not None
@@ -704,6 +775,8 @@ class _Manager:
                 and not breakdown_changed
                 and not drop_hit_changed
                 and not input_changed
+                and not silence_changed
+                and not server_changed
             ):
                 return "No changes to apply."
 
@@ -766,6 +839,21 @@ class _Manager:
                 parts.append("drop sensing")
             if style_changed:
                 parts.append(f"style {cfg.detection.style}")
+            if silence_changed:
+                parts.append(
+                    "pause if silent on" if cfg.detection.silence_gate else "pause if silent off"
+                )
+            if server_changed:
+                parts.append(
+                    "output at startup on"
+                    if cfg.server.startup_output
+                    else "output at startup off"
+                )
+                if cfg.server.reboot_enabled and cfg.server.reboot_days:
+                    days = "/".join(cfg.server.reboot_days)
+                    parts.append(f"reboot {days} at {cfg.server.reboot_time}")
+                else:
+                    parts.append("scheduled reboot off")
             if four_four_changed:
                 parts.append(
                     f"4/4 sensitivity {cfg.detection.four_four_intensity:.0%}, "
@@ -786,6 +874,17 @@ class _Manager:
                     f"noise floor {cfg.audio.noise_floor_db:g} dBFS, "
                     f"visualizer {cfg.ui.visualizer_mode}"
                 )
+            if schedule_changed:
+                try:
+                    cron_root = (
+                        Path(self.config_path).resolve().parent if self.config_path else None
+                    )
+                    cron_note = apply_host_schedule(cfg.server, root=cron_root)
+                    if cron_note:
+                        parts.append(cron_note)
+                except Exception as exc:
+                    parts.append(f"schedule not installed: {exc}")
+
             note = " and ".join(parts)
             if self.dry_run and (audio_changed or matter_changed):
                 note += " (dry run: not sending)"
@@ -887,6 +986,12 @@ class _Manager:
         text = self._upsert_in_section(
             text, "ui", "visualizer_mode", self.cfg.ui.visualizer_mode
         )
+        text = self._ensure_section(text, "server")
+        srv = self.cfg.server
+        text = self._upsert_in_section(text, "server", "startup_output", bool(srv.startup_output))
+        text = self._upsert_in_section(text, "server", "reboot_enabled", bool(srv.reboot_enabled))
+        text = self._upsert_in_section(text, "server", "reboot_time", srv.reboot_time)
+        text = self._upsert_in_section(text, "server", "reboot_days", list(srv.reboot_days))
         path.write_text(text)
 
     def _ensure_section(self, text: str, section: str) -> str:
@@ -901,6 +1006,9 @@ class _Manager:
             line = f"{key} = {int(value)}"
         elif isinstance(value, float):
             line = f"{key} = {value:g}"
+        elif isinstance(value, (list, tuple)):
+            inner = ", ".join(f'"{item}"' for item in value)
+            line = f"{key} = [{inner}]"
         else:
             line = f'{key} = "{value}"'
         pattern = rf"(?ms)(^\[{re.escape(section)}\]\s*\n)(.*?)(?=^\[|\Z)"
@@ -1061,6 +1169,10 @@ def run_ui(
         breakdown_beats = body.get("breakdown_beats")
         drop_hit_seconds = body.get("drop_hit_seconds")
         drop_hit_fade_seconds = body.get("drop_hit_fade_seconds")
+        startup_output = body.get("startup_output")
+        reboot_enabled = body.get("reboot_enabled")
+        reboot_time = body.get("reboot_time")
+        reboot_days = body.get("reboot_days")
         if drop_sensing is not None and not isinstance(drop_sensing, dict):
             return web.json_response({"error": "drop_sensing must be an object"}, status=400)
         if protocol is not None:
@@ -1085,7 +1197,11 @@ def run_ui(
                 )
         if interface is not None:
             interface = str(interface).strip()
-            if interface:
+            if interface.lower() in ("localhost", "lo", "127.0.0.1"):
+                interface = ""
+                mode = "localhost"
+                matter_mode = "localhost"
+            elif interface:
                 known = {i["name"] for i in list_ipv4_interfaces()}
                 if interface not in known:
                     return web.json_response(
@@ -1207,6 +1323,28 @@ def run_ui(
                 return web.json_response({"error": "unknown style"}, status=400)
         if silence_gate is not None:
             silence_gate = bool(silence_gate)
+        if startup_output is not None:
+            startup_output = bool(startup_output)
+        if reboot_enabled is not None:
+            reboot_enabled = bool(reboot_enabled)
+        if reboot_time is not None:
+            parsed_time = try_reboot_time(reboot_time)
+            if parsed_time is None:
+                return web.json_response(
+                    {"error": "reboot_time must be HH:MM"}, status=400
+                )
+            reboot_time = parsed_time
+        if reboot_days is not None:
+            reboot_days = coerce_reboot_days(reboot_days)
+            enabled_now = (
+                reboot_enabled
+                if reboot_enabled is not None
+                else manager.cfg.server.reboot_enabled
+            )
+            if enabled_now and not reboot_days:
+                return web.json_response(
+                    {"error": "pick at least one reboot day"}, status=400
+                )
         if bpm_rate_min is not None:
             bpm_rate_min = str(bpm_rate_min).lower()
             if bpm_rate_min not in BPM_RATE_NAMES:
@@ -1411,6 +1549,10 @@ def run_ui(
                     breakdown_beats,
                     drop_hit_seconds,
                     drop_hit_fade_seconds,
+                    startup_output,
+                    reboot_enabled,
+                    reboot_time,
+                    reboot_days,
                 ),
             )
         except Exception as exc:  # e.g. unknown device name
@@ -1674,6 +1816,26 @@ def run_ui(
     app.router.add_get("/internal/matter/output", matter_output_handler)
     app.router.add_post("/internal/matter/output", matter_output_handler)
     app.router.add_route("*", "/api/matter/{path:.*}", matter_proxy_handler)
+    mapper_dir = static_dir() / "pixel_mapper"
+
+    async def pixel_redirect(_request: web.Request) -> web.StreamResponse:
+        raise web.HTTPFound("/pixel-mapper/")
+
+    async def pixel_files(request: web.Request) -> web.FileResponse:
+        rel = request.match_info.get("path", "") or "index.html"
+        dest = (mapper_dir / rel).resolve()
+        root = mapper_dir.resolve()
+        if dest != root and root not in dest.parents:
+            raise web.HTTPNotFound()
+        if dest.is_dir():
+            dest = dest / "index.html"
+        if not dest.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(dest)
+
+    app.router.add_get("/pixel-mapper", pixel_redirect)
+    app.router.add_get("/pixel-mapper/", pixel_files)
+    app.router.add_get("/pixel-mapper/{path:.*}", pixel_files)
 
     print(f"Dashboard: http://localhost:{port}")
     try:

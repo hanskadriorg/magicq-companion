@@ -58,19 +58,25 @@
   }
   header .meta { font-size: 11px; color: #9aa0a8; text-align: right; line-height: 1.4; flex: 1; text-shadow: 1px 1px 0 #111; }
   header .hdr-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
-  header .stop, header .reboot {
+  header .restart, header .reboot {
     font-family: inherit; font-size: 11px; font-weight: 700;
-    background: var(--face); color: var(--text);
-    border-top: 1px solid #6a6860; border-left: 1px solid #6a6860;
-    border-right: 1px solid #1a1918; border-bottom: 1px solid #1a1918;
     border-radius: 0; padding: 4px 10px; cursor: pointer; white-space: nowrap;
   }
-  header .stop { color: #c07070; }
-  header .stop:active, header .reboot:active {
+  header .restart {
+    background: #eceae4; color: #1a1918;
+    border-top: 1px solid #fff; border-left: 1px solid #fff;
+    border-right: 1px solid #8a8880; border-bottom: 1px solid #8a8880;
+  }
+  header .reboot {
+    background: #9a2b2b; color: #f4f0ee;
+    border-top: 1px solid #c06060; border-left: 1px solid #c06060;
+    border-right: 1px solid #4a1010; border-bottom: 1px solid #4a1010;
+  }
+  header .restart:active, header .reboot:active {
     border-top: 1px solid #404040; border-left: 1px solid #404040;
     border-right: 1px solid #fff; border-bottom: 1px solid #fff;
   }
-  header .stop:disabled, header .reboot:disabled { opacity: .5; cursor: default; }
+  header .restart:disabled, header .reboot:disabled { opacity: .5; cursor: default; }
   .toggle {
     display: flex; align-items: center; gap: 5px; cursor: pointer;
     font-size: 11px; font-weight: 700; color: #c8c6be; user-select: none;
@@ -390,11 +396,11 @@
     padding: 6px; display: none;
   }
 
-  .settings { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .settings { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; min-width: 0; }
   .settings label {
     font-size: 11px; color: var(--text); letter-spacing: 0;
     text-transform: none; display: flex; flex-direction: column; gap: 4px;
-    flex: 1 1 160px;
+    flex: 1 1 140px; min-width: 0;
   }
   .settings [hidden] { display: none !important; }
   .settings select, .settings input {
@@ -402,11 +408,16 @@
     border-radius: 0; padding: 4px 6px; font-size: 13px; font-family: inherit;
     width: 100%;
   }
-  .settings select { min-width: 200px; }
+  .settings select { min-width: 0; }
   .settings input[type="text"] { min-width: 140px; }
   .settings input[type="number"] { min-width: 80px; max-width: 110px; }
+  .settings input[type="time"] { min-width: 120px; max-width: 160px; }
   .settings select:focus, .settings input:focus { outline: 1px dotted #8c8a82; }
-  .settings .actions { display: flex; gap: 6px; align-items: flex-end; }
+  .settings .actions {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end;
+    flex: 1 1 100%; min-width: 0; width: 100%;
+  }
+  .settings .actions button { flex: 0 1 auto; }
   .settings button {
     background: var(--face); color: var(--text); font-weight: 700; font-family: inherit;
     border-top: 1px solid #6a6860; border-left: 1px solid #6a6860;
@@ -472,6 +483,27 @@
   }
   .modal .check-row { flex-wrap: wrap; }
   .modal .check-row .field-help { flex: 1 1 100%; margin: 0 0 0 26px; }
+  .reboot-fields {
+    border: 1px solid #3d4a58;
+    margin: 4px 0 0;
+    padding: 10px;
+    min-width: 0;
+  }
+  .reboot-fields:disabled { opacity: 0.45; }
+  .day-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 8px;
+  }
+  .day-row label {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding-top: 0;
+  }
+  .day-row input { width: auto; min-width: 0; accent-color: #4a5a6a; }
   .modal .settings { flex-direction: column; align-items: stretch; }
   .modal .settings label { flex: 0 0 auto; }
   .dual-label { flex: 1 1 280px; }
@@ -522,34 +554,112 @@
   .badge.ok { color: #7a9a70; border-color: #4a5a44; }
   .badge.warn { color: #b09060; border-color: #6a5a38; }
   .matter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+  body[data-mode="menu"] .wrap { max-width: 980px; }
+  body[data-mode="pixel"] .wrap { max-width: 1400px; }
+  body[data-mode="matter"] .wrap { max-width: 920px; }
+  body:not([data-mode="audio"]) .audio-only { display: none !important; }
+  body[data-mode="menu"] #btnMenu,
+  body:not([data-mode="menu"]) #startMenu,
+  body:not([data-mode="pixel"]) #pixelStage,
+  body[data-mode="menu"] #layoutGrid,
+  body[data-mode="pixel"] #layoutGrid { display: none !important; }
+  header .menu-btn {
+    font-family: inherit; font-size: 11px; font-weight: 700;
+    background: var(--face); color: var(--text);
+    border-top: 1px solid #6a6860; border-left: 1px solid #6a6860;
+    border-right: 1px solid #1a1918; border-bottom: 1px solid #1a1918;
+    border-radius: 0; padding: 4px 10px; cursor: pointer; white-space: nowrap;
+  }
+  header .menu-btn:active {
+    border-top: 1px solid #404040; border-left: 1px solid #404040;
+    border-right: 1px solid #fff; border-bottom: 1px solid #fff;
+  }
+  .start-menu { display: flex; flex-direction: column; gap: 14px; }
+  .start-lead { font-size: 13px; color: var(--dim); }
+  .start-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .start-card {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+    text-align: left; min-height: 132px; padding: 16px 14px;
+    background: var(--face); color: var(--text); font-family: inherit;
+    border-top: 1px solid #6a6860; border-left: 1px solid #6a6860;
+    border-right: 1px solid #1a1918; border-bottom: 1px solid #1a1918;
+    box-shadow: 0 0 0 1px #111; cursor: pointer;
+  }
+  .start-card:hover { background: #44433f; }
+  .start-card:active {
+    border-top: 1px solid #404040; border-left: 1px solid #404040;
+    border-right: 1px solid #fff; border-bottom: 1px solid #fff;
+  }
+  .start-card-title { font-size: 15px; font-weight: 700; }
+  .start-card-desc { font-size: 12px; color: var(--dim); line-height: 1.4; }
+  .pixel-stage { min-height: 70vh; }
+  .pixel-stage iframe {
+    width: 100%; height: min(82vh, 920px); border: 3px solid #3d4a58;
+    background: #1a1a1a; border-radius: 8px 8px 2px 2px;
+  }
+  .box-soon { opacity: 0.55; filter: grayscale(0.35); }
+  .soon-body {
+    pointer-events: none; padding: 28px 16px; text-align: center;
+  }
+  .soon-title { font-size: 16px; font-weight: 700; color: var(--text); }
+  .soon-hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
+  #boxStash { display: none; }
 </style>
 </head>
-<body>
+<body data-mode="menu">
 <div class="wrap" id="wrap">
   <header>
-    <h1>MAGICQ COMPANION</h1>
+    <h1 id="hdrTitle">MAGICQ COMPANION</h1>
     <div class="meta" id="meta">connecting&hellip;</div>
     <div class="hdr-actions">
-      <label class="toggle on" id="lblAnalyze" title="Pause analysis; server and web UI stay up">
+      <button type="button" class="menu-btn" id="btnMenu" title="Back to the start menu">Menu</button>
+      <label class="toggle on audio-only" id="lblAnalyze" title="Pause analysis; server and web UI stay up">
         <input type="checkbox" id="chkAnalyze" checked>
         <span class="knob"></span>
         <span id="lblAnalyzeText">Analyzer on</span>
       </label>
-      <label class="toggle on" id="lblEnable" title="Blackout Art-Net without stopping the server">
+      <label class="toggle on audio-only" id="lblEnable" title="Blackout Art-Net without stopping the server">
         <input type="checkbox" id="chkEnable" checked>
         <span class="knob"></span>
         <span id="lblEnableText">Output on</span>
       </label>
-      <label class="toggle on" id="lblViz" title="Stop computing the spectrum (saves RAM)">
+      <label class="toggle on audio-only" id="lblViz" title="Stop computing the spectrum (saves RAM)">
         <input type="checkbox" id="chkViz" checked>
         <span class="knob"></span>
         <span id="lblVizText">Visualizer on</span>
       </label>
       <button type="button" class="reboot" id="btnReboot" title="Reboot this computer">Reboot device</button>
-      <button type="button" class="stop" id="btnRestart" title="Restart Companion without rebooting the computer">Restart companion</button>
+      <button type="button" class="restart" id="btnRestart" title="Restart Companion without rebooting the computer">Restart companion</button>
     </div>
   </header>
 
+  <div class="start-menu" id="startMenu">
+    <p class="start-lead">Choose a tool. You can come back here with Menu.</p>
+    <div class="start-cards">
+      <button type="button" class="start-card" data-mode="audio">
+        <span class="start-card-title">Audio based autopilot</span>
+        <span class="start-card-desc">Live audio analysis to Art-Net / sACN. Build, drop, breakdown, and the section log.</span>
+      </button>
+      <button type="button" class="start-card" data-mode="matter">
+        <span class="start-card-title">Matter to DMX</span>
+        <span class="start-card-desc">Pair Matter lights and send them to MagicQ on their own universe.</span>
+      </button>
+      <button type="button" class="start-card" data-mode="pixel">
+        <span class="start-card-title">Pixel mapper</span>
+        <span class="start-card-desc">Place line and matrix fixtures, then export a MagicQ Import Grid CSV.</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="pixel-stage" id="pixelStage">
+    <iframe id="pixelFrame" title="ChamSys Pixel Grid Mapper"></iframe>
+  </div>
+
+  <div id="boxStash"></div>
   <div class="dock" id="layoutGrid">
     <div class="panel box" data-box="settings" id="box-settings">
       <div class="win-bar" draggable="true"><h2>Settings</h2><span class="xp-btns" aria-hidden="true"></span></div>
@@ -584,7 +694,7 @@
             <option value="sacn">sACN (E1.31)</option>
           </select>
         </label>
-        <label>Destination
+        <label id="lblAudioDest">Destination
           <select id="selMode">
             <option value="unicast">Unicast</option>
             <option value="broadcast">Broadcast</option>
@@ -607,6 +717,7 @@
           <button type="button" class="secondary" id="btnDropHitSettings" title="How long the drop-hit channel stays full, then fades">Drop hit settings…</button>
           <button type="button" class="secondary" id="btnBreakdownSettings" title="How a breakdown is detected">Breakdown settings…</button>
           <button type="button" class="secondary" id="btnFourFourSettings" title="How the 4/4 lock on channel 11 is detected">4/4 settings…</button>
+          <button type="button" class="secondary" id="btnServerSettings" title="Silence gate, output at startup, scheduled reboot">Server settings…</button>
         </div>
         <label>Style
           <select id="selStyle">
@@ -616,10 +727,6 @@
             <option value="punchy">Punchy</option>
             <option value="breakdown">Breakdown-first</option>
           </select>
-        </label>
-        <label class="check-row" style="flex:1 1 220px;padding-top:14px">
-          <input type="checkbox" id="chkSilenceGate" checked>
-          <span>Pause output if no music for 10 min</span>
         </label>
         <label class="slider-label dual-label">BPM divider
           <span class="field-help">Lower knob is the quiet floor; upper knob is the loud ceiling (1/8 … 1/1 of the chase).</span>
@@ -727,6 +834,14 @@
       <div class="seclog" id="seclog"><div class="empty">Waiting for the first section change&hellip;</div></div>
     </div>
 
+    <div class="panel box box-soon" data-box="gamepad" id="box-gamepad">
+      <div class="win-bar" draggable="true"><h2>Gamepad to DMX</h2><span class="xp-btns" aria-hidden="true"></span></div>
+      <div class="soon-body">
+        <p class="soon-title">Coming soon</p>
+        <p class="soon-hint">Map a gamepad to DMX channels.</p>
+      </div>
+    </div>
+
     <div class="panel box" data-box="matter" id="box-matter">
       <div class="win-bar" draggable="true"><h2>Matter setup</h2><span class="xp-btns" aria-hidden="true"></span></div>
       <div class="settings">
@@ -737,7 +852,7 @@
             <option value="sacn">sACN (E1.31)</option>
           </select>
         </label>
-        <label>Destination
+        <label id="lblMatterDest">Destination
           <select id="selMatterMode">
             <option value="unicast">Unicast</option>
             <option value="broadcast">Broadcast</option>
@@ -985,6 +1100,57 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="serverSettingsModal">
+  <div class="modal" role="dialog" aria-labelledby="serverSettingsTitle">
+    <h3 id="serverSettingsTitle">Server settings</h3>
+    <p class="hint">
+      These apply on this machine: silence blackout, whether output starts on,
+      and an optional weekly reboot. Saving a reboot schedule writes crontab;
+      it does not reboot now.
+    </p>
+    <div class="settings">
+      <label class="check-row">
+        <input type="checkbox" id="chkSilenceGate" checked>
+        <span>Pause output if no music for 10 min</span>
+        <span class="field-help">Blackout Art-Net/sACN (and Matter DMX) after 10 minutes of hiss or silence. Music turns output back on.</span>
+      </label>
+      <label>Output at startup
+        <span class="field-help">Used when Companion starts. The live Output switch does not change this.</span>
+        <select id="selStartupOutput">
+          <option value="1">On</option>
+          <option value="0">Off</option>
+        </select>
+      </label>
+      <label class="check-row">
+        <input type="checkbox" id="chkRebootEnabled">
+        <span>Scheduled reboot</span>
+        <span class="field-help">Reboot this computer at the time below on the selected days.</span>
+      </label>
+      <fieldset class="reboot-fields" id="rebootFields" disabled>
+        <label>Reboot time
+          <input type="time" id="inRebootTime" value="14:00">
+        </label>
+        <div class="day-row" id="rebootDays">
+          <label><input type="checkbox" data-day="mon" checked> Mon</label>
+          <label><input type="checkbox" data-day="tue" checked> Tue</label>
+          <label><input type="checkbox" data-day="wed" checked> Wed</label>
+          <label><input type="checkbox" data-day="thu" checked> Thu</label>
+          <label><input type="checkbox" data-day="fri" checked> Fri</label>
+          <label><input type="checkbox" data-day="sat"> Sat</label>
+          <label><input type="checkbox" data-day="sun"> Sun</label>
+        </div>
+      </fieldset>
+    </div>
+    <div class="settings-note" id="serverSettingsNote"></div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnServerSettingsCancel">Close</button>
+        <button type="button" id="btnServerSettingsSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const COLORS = { groove: "#3fa7ff", breakdown: "#a78bfa", buildup: "#ffb020", drop: "#ff4757", off: "#8a919e" };
 const CH_CHIPS = [
@@ -1001,7 +1167,19 @@ const CH_CHIPS = [
 const BPM_RATE_LABELS = {32: "1/8", 64: "1/4", 128: "1/2", 255: "1/1"};
 const BPM_STEPS = ["eighth", "quarter", "half", "full"];
 const BPM_STEP_LABELS = ["1/8", "1/4", "1/2", "1/1"];
-const BOX_IDS = ["settings", "hero", "dmx", "log", "matter"];
+const BOX_IDS = ["settings", "hero", "dmx", "log", "matter", "gamepad"];
+const MODE_BOXES = {
+  audio: ["settings", "hero", "dmx", "log", "gamepad"],
+  matter: ["matter"],
+  pixel: [],
+  menu: [],
+};
+const MODE_TITLES = {
+  menu: "MAGICQ COMPANION",
+  audio: "AUDIO AUTOPILOT",
+  matter: "MATTER TO DMX",
+  pixel: "PIXEL MAPPER",
+};
 const HERO_PANES = ["head", "input", "spark", "meters"];
 // Input meter / absolute visualiser span, in dBFS.
 const DB_MIN = -90;
@@ -1032,6 +1210,7 @@ let layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
 let dragBoxId = null;
 let dragPaneId = null;
 let layoutSaveTimer = null;
+let appMode = "menu";
 
 for (const {ch, name} of CH_CHIPS) {
   const chip = document.createElement("div");
@@ -1430,36 +1609,59 @@ function fmtHeld(seconds) {
   return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
+const SECTION_LOG_SECONDS = 180;
+let sectionLogRows = [];
+let sectionLogTimer = null;
+
+function visibleSectionRows(rows) {
+  const now = Date.now() / 1000;
+  const cutoff = now - SECTION_LOG_SECONDS;
+  const list = rows || [];
+  return list.map((r, i) => {
+    const current = i === list.length - 1;
+    const held = current ? Math.max(0, now - Number(r.ts)) : Number(r.held || 0);
+    return { ...r, held, current, _end: Number(r.ts) + held };
+  }).filter(r => r._end >= cutoff);
+}
+
 function renderSectionLog(rows) {
   const host = $("seclog");
-  if (!rows || !rows.length) {
+  const visible = visibleSectionRows(rows);
+  if (!visible.length) {
     host.innerHTML = '<div class="empty">Waiting for the first section change&hellip;</div>';
     return;
   }
-  const body = rows.slice().reverse().map(r => {
+  const body = visible.slice().reverse().map(r => {
     const color = COLORS[r.section] || "#e8eaed";
     const label = SECTION_LABELS[r.section] || r.section;
-    const from = r.from ? (SECTION_LABELS[r.from] || r.from) : "start";
     return `<tr>
       <td>${fmtClock(r.ts)}</td>
       <td class="sec" style="color:${color}">${escapeHtml(label)}</td>
-      <td>${escapeHtml(from)}</td>
       <td>${fmtHeld(r.held)}</td>
       <td>${r.bpm > 0 ? Number(r.bpm).toFixed(1) : "&mdash;"}</td>
       <td>${Number(r.level_db ?? 0).toFixed(0)} dB</td>
     </tr>`;
   }).join("");
   host.innerHTML = `<table>
-    <thead><tr><th>Time</th><th>Entered</th><th>From</th><th>Previous held</th><th>BPM</th><th>Level</th></tr></thead>
+    <thead><tr><th>Time</th><th>Section</th><th>Held</th><th>BPM</th><th>Level</th></tr></thead>
     <tbody>${body}</tbody>
   </table>`;
+}
+
+function startSectionLogTimer() {
+  if (sectionLogTimer) return;
+  sectionLogTimer = setInterval(() => {
+    if (sectionLogRows.length) renderSectionLog(sectionLogRows);
+  }, 1000);
 }
 
 async function loadSectionLog() {
   try {
     const r = await fetch("/api/sections", { cache: "no-store" });
     const d = await r.json();
-    renderSectionLog(d.sections);
+    sectionLogRows = d.sections || [];
+    renderSectionLog(sectionLogRows);
+    startSectionLogTimer();
   } catch (_e) {
     /* the next section change will retry */
   }
@@ -1651,6 +1853,40 @@ function fillFourFourForm(meta) {
   syncFourFourLabels();
 }
 
+function syncRebootFields() {
+  const on = $("chkRebootEnabled").checked;
+  $("rebootFields").disabled = !on;
+}
+
+function fillServerForm(meta) {
+  if (!meta) return;
+  if (meta.silence_gate !== undefined) $("chkSilenceGate").checked = !!meta.silence_gate;
+  if (meta.startup_output !== undefined) {
+    $("selStartupOutput").value = meta.startup_output ? "1" : "0";
+  }
+  if (meta.reboot_enabled !== undefined) $("chkRebootEnabled").checked = !!meta.reboot_enabled;
+  if (meta.reboot_time) $("inRebootTime").value = String(meta.reboot_time).slice(0, 5);
+  const days = Array.isArray(meta.reboot_days) ? meta.reboot_days : [];
+  $("rebootDays").querySelectorAll("input[data-day]").forEach(el => {
+    el.checked = days.includes(el.dataset.day);
+  });
+  syncRebootFields();
+}
+
+function collectServerSettings() {
+  const days = [];
+  $("rebootDays").querySelectorAll("input[data-day]").forEach(el => {
+    if (el.checked) days.push(el.dataset.day);
+  });
+  return {
+    silence_gate: $("chkSilenceGate").checked,
+    startup_output: $("selStartupOutput").value === "1",
+    reboot_enabled: $("chkRebootEnabled").checked,
+    reboot_time: $("inRebootTime").value || "14:00",
+    reboot_days: days,
+  };
+}
+
 function fillBreakdownForm(meta) {
   if (!meta) return;
   if (meta.breakdown_intensity != null) {
@@ -1765,20 +2001,44 @@ function normalizeHeroOrder(raw) {
   return order;
 }
 
+function applyWrapWidth(lay) {
+  const mode = document.body.dataset.mode || "menu";
+  if (mode === "menu") $("wrap").style.maxWidth = "980px";
+  else if (mode === "pixel") $("wrap").style.maxWidth = "1400px";
+  else if (mode === "matter") $("wrap").style.maxWidth = "920px";
+  else {
+    const allowed = new Set(MODE_BOXES.audio);
+    const split = (lay || layout).rows.some(r => (r.ids || []).filter(id => allowed.has(id)).length > 1);
+    $("wrap").style.maxWidth = split ? "1240px" : "780px";
+  }
+}
+
 function applyLayout(lay) {
   const dock = $("layoutGrid");
+  const stash = $("boxStash");
   applyHeroLayout(lay);
+  const allowed = new Set(MODE_BOXES[document.body.dataset.mode] || []);
+  // Pull hidden windows out first so tearing down old rows cannot delete them.
+  for (const id of BOX_IDS) {
+    if (!allowed.has(id)) {
+      const el = boxEl(id);
+      if (el) stash.appendChild(el);
+    }
+  }
   const rows = lay.rows || [];
   const stale = [...dock.querySelectorAll(".dock-row")];
+  const placed = new Set();
   for (const row of rows) {
+    const ids = (row.ids || []).filter(id => allowed.has(id) && boxEl(id));
+    if (!ids.length) continue;
     const rowEl = document.createElement("div");
     rowEl.className = "dock-row";
-    if ((row.ids || []).length > 1) rowEl.classList.add("split");
+    if (ids.length > 1) rowEl.classList.add("split");
     const h = clampHeight(row.h);
-    for (const id of row.ids || []) {
+    for (const id of ids) {
       const el = boxEl(id);
-      if (!el) continue;
       rowEl.appendChild(el);
+      placed.add(id);
       if (h >= 80) {
         el.style.height = h + "px";
         el.classList.add("has-height");
@@ -1789,8 +2049,34 @@ function applyLayout(lay) {
     }
     dock.appendChild(rowEl);
   }
+  for (const id of BOX_IDS) {
+    if (!allowed.has(id) || placed.has(id)) continue;
+    const el = boxEl(id);
+    if (!el) continue;
+    const rowEl = document.createElement("div");
+    rowEl.className = "dock-row";
+    rowEl.appendChild(el);
+    dock.appendChild(rowEl);
+  }
   stale.forEach(el => el.remove());
-  $("wrap").style.maxWidth = rows.some(r => (r.ids || []).length > 1) ? "1240px" : "780px";
+  applyWrapWidth(lay);
+}
+
+function setAppMode(mode) {
+  if (!MODE_BOXES[mode]) mode = "menu";
+  appMode = mode;
+  document.body.dataset.mode = mode;
+  $("hdrTitle").textContent = MODE_TITLES[mode] || MODE_TITLES.menu;
+  if (mode === "pixel") {
+    const frame = $("pixelFrame");
+    if (!frame.getAttribute("src")) frame.src = "/pixel-mapper/";
+  }
+  if (mode === "audio" || mode === "matter") applyLayout(layout);
+  else applyWrapWidth(layout);
+  if (location.hash.replace("#", "") !== mode && mode !== "menu") {
+    history.replaceState(null, "", "#" + mode);
+  }
+  if (mode === "menu" && location.hash) history.replaceState(null, "", location.pathname || "/");
 }
 
 function scheduleSaveLayout() {
@@ -1999,6 +2285,10 @@ function fillInterfaceSelect(ifaces, preferred) {
   def.value = "";
   def.textContent = "System default";
   sel.appendChild(def);
+  const local = document.createElement("option");
+  local.value = "localhost";
+  local.textContent = "Localhost";
+  sel.appendChild(local);
   for (const nic of ifaces || []) {
     const opt = document.createElement("option");
     opt.value = nic.name;
@@ -2028,8 +2318,8 @@ function fillInterfaceSelect(ifaces, preferred) {
 function fillModeOptions(sel, protocol, preferred) {
   if (typeof sel === "string") sel = $(sel);
   const modes = protocol === "sacn"
-    ? [["unicast", "Unicast"], ["multicast", "Multicast"], ["localhost", "Localhost"]]
-    : [["unicast", "Unicast"], ["broadcast", "Broadcast"], ["localhost", "Localhost"]];
+    ? [["unicast", "Unicast"], ["multicast", "Multicast"]]
+    : [["unicast", "Unicast"], ["broadcast", "Broadcast"]];
   const want = modes.some(m => m[0] === preferred) ? preferred : modes[0][0];
   sel.innerHTML = "";
   for (const [value, label] of modes) {
@@ -2041,10 +2331,34 @@ function fillModeOptions(sel, protocol, preferred) {
   sel.value = want;
 }
 
+function isLocalhostIface() {
+  return $("selInterface").value === "localhost";
+}
+
+function destModeFromMeta(protocol, mode) {
+  if (mode && mode !== "localhost") return mode;
+  return protocol === "sacn" ? "unicast" : "broadcast";
+}
+
+function collectNetworkTarget() {
+  const local = isLocalhostIface();
+  return {
+    local,
+    interface: local ? "" : $("selInterface").value,
+    mode: local ? "localhost" : $("selMode").value,
+    matter_mode: local ? "localhost" : $("selMatterMode").value,
+  };
+}
+
 function syncOutputLabels() {
   const proto = $("selProtocol").value;
   const matterProto = $("selMatterProtocol").value;
-  const unicast = $("selMode").value === "unicast" || $("selMatterMode").value === "unicast";
+  const local = isLocalhostIface();
+  $("selMode").disabled = local;
+  $("selMatterMode").disabled = local;
+  $("lblAudioDest").style.opacity = local ? "0.45" : "1";
+  $("lblMatterDest").style.opacity = local ? "0.45" : "1";
+  const unicast = !local && ($("selMode").value === "unicast" || $("selMatterMode").value === "unicast");
   $("lblIp").style.display = unicast ? "" : "none";
   $("inIp").disabled = !unicast;
   $("lblIpText").textContent = "Unicast IP (shared)";
@@ -2091,10 +2405,17 @@ function applyMetaToForm(meta, devices, interfaces) {
   simulateMode = !!meta.simulate;
   currentDeviceHint = meta.device || "";
   if (meta.protocol) $("selProtocol").value = meta.protocol;
-  fillModeOptions("selMode", $("selProtocol").value, meta.mode);
-  fillModeOptions("selMatterMode", meta.matter_protocol || "artnet", meta.matter_mode);
+  fillModeOptions("selMode", $("selProtocol").value, destModeFromMeta(meta.protocol, meta.mode));
+  fillModeOptions(
+    "selMatterMode",
+    meta.matter_protocol || "artnet",
+    destModeFromMeta(meta.matter_protocol || "artnet", meta.matter_mode)
+  );
   if (meta.matter_protocol) $("selMatterProtocol").value = meta.matter_protocol;
-  fillInterfaceSelect(interfaces || [], meta.interface || "");
+  const iface = (
+    meta.mode === "localhost" || meta.matter_mode === "localhost" || meta.interface === "localhost"
+  ) ? "localhost" : (meta.interface || "");
+  fillInterfaceSelect(interfaces || [], iface);
   $("inIp").value = meta.ip || "";
   $("inPort").value = meta.port ?? (meta.protocol === "sacn" ? 5568 : 6454);
   $("inUni").value = meta.universe ?? 0;
@@ -2116,10 +2437,10 @@ function applyMetaToForm(meta, devices, interfaces) {
   fillFourFourForm(meta);
   fillBreakdownForm(meta);
   fillDropHitForm(meta);
+  fillServerForm(meta);
   if (meta.noise_floor_db != null) setNoiseFloorUI(meta.noise_floor_db);
   setVizModeUI(meta.visualizer_mode || "auto");
   if (meta.style) $("selStyle").value = meta.style;
-  if (meta.silence_gate !== undefined) $("chkSilenceGate").checked = !!meta.silence_gate;
   if (meta.enabled !== undefined) setEnableUI(meta.enabled);
   if (meta.analyzing !== undefined) setAnalyzeUI(meta.analyzing);
   if (meta.visualizer !== undefined) setVisualizerUI(meta.visualizer);
@@ -2156,7 +2477,7 @@ async function bootstrapSettings() {
     applyMetaToForm(d.meta, d.devices, d.interfaces);
     if (d.layout) {
       layout = normalizeLayout(d.layout);
-      applyLayout(layout);
+      if (appMode === "audio" || appMode === "matter") applyLayout(layout);
     }
     loadSectionLog();
     if (!d.meta.dry_run) $("settingsNote").textContent = "";
@@ -2279,6 +2600,13 @@ wireModal("dropSettingsModal", "btnDropSettings", "btnDropSettingsCancel");
 wireModal("fourFourSettingsModal", "btnFourFourSettings", "btnFourFourSettingsCancel");
 wireModal("breakdownSettingsModal", "btnBreakdownSettings", "btnBreakdownSettingsCancel");
 wireModal("dropHitSettingsModal", "btnDropHitSettings", "btnDropHitSettingsCancel");
+wireModal("serverSettingsModal", "btnServerSettings", "btnServerSettingsCancel");
+$("chkRebootEnabled").onchange = syncRebootFields;
+$("btnServerSettingsSave").onclick = () => postSettings(
+  collectServerSettings(),
+  "serverSettingsNote",
+  "Server settings saved"
+);
 $("btnBuildSettingsSave").onclick = () => postSettings({
   build_intensity: Number($("rngBuildIntensity").value) / 100,
   build_decay_seconds: Number($("rngBuildDecay").value),
@@ -2302,7 +2630,14 @@ $("btnDropHitSettingsSave").onclick = () => postSettings({
 }, "dropHitSettingsNote", "Drop hit settings saved");
 wireWindows();
 wireHeroPanes();
-applyLayout(layout);
+$("btnMenu").onclick = () => setAppMode("menu");
+document.querySelectorAll("#startMenu .start-card").forEach(btn => {
+  btn.onclick = () => setAppMode(btn.dataset.mode);
+});
+{
+  const hashMode = location.hash.replace("#", "");
+  setAppMode(MODE_BOXES[hashMode] ? hashMode : "menu");
+}
 
 async function postEnableBody(body, revert) {
   try {
@@ -2357,18 +2692,20 @@ $("selMatterProtocol").onchange = () => {
 };
 $("selMode").onchange = syncOutputLabels;
 $("selMatterMode").onchange = syncOutputLabels;
+$("selInterface").onchange = syncOutputLabels;
 syncOutputLabels();
 
 function collectMatterSettings() {
+  const net = collectNetworkTarget();
   const body = {
     matter_protocol: $("selMatterProtocol").value,
-    matter_mode: $("selMatterMode").value,
+    matter_mode: net.matter_mode,
     matter_port: Number($("inMatterPort").value),
     matter_universe: Number($("inMatterUni").value),
     matter_priority: Number($("inMatterPriority").value),
     matter_enabled: $("selMatterEnabled").value === "1",
   };
-  if ($("selMatterMode").value === "unicast") body.ip = $("inIp").value.trim();
+  if (!net.local && $("selMatterMode").value === "unicast") body.ip = $("inIp").value.trim();
   return body;
 }
 
@@ -2388,7 +2725,11 @@ $("btnMatterApply").onclick = async () => {
     if (!r.ok) throw new Error(d.error || "failed to apply");
     note.className = "settings-note ok";
     note.textContent = d.message;
-    fillModeOptions("selMatterMode", body.matter_protocol, body.matter_mode);
+    fillModeOptions(
+      "selMatterMode",
+      body.matter_protocol,
+      destModeFromMeta(body.matter_protocol, body.matter_mode)
+    );
     syncOutputLabels();
   } catch (e) {
     note.className = "settings-note err";
@@ -2403,15 +2744,16 @@ $("btnApply").onclick = async () => {
   note.className = "settings-note";
   note.textContent = "applying\u2026";
   try {
+    const net = collectNetworkTarget();
     const body = {
       protocol: $("selProtocol").value,
-      mode: $("selMode").value,
-      interface: $("selInterface").value,
+      mode: net.mode,
+      interface: net.interface,
       port: Number($("inPort").value),
       universe: Number($("inUni").value),
       priority: Number($("inPriority").value),
       matter_protocol: $("selMatterProtocol").value,
-      matter_mode: $("selMatterMode").value,
+      matter_mode: net.matter_mode,
       matter_port: Number($("inMatterPort").value),
       matter_universe: Number($("inMatterUni").value),
       matter_priority: Number($("inMatterPriority").value),
@@ -2420,9 +2762,8 @@ $("btnApply").onclick = async () => {
       bpm_rate_max: BPM_STEPS[Number($("rngBpmHi").value)],
       bpm_rate_decay: Number($("rngBpmDecay").value),
       style: $("selStyle").value,
-      silence_gate: $("chkSilenceGate").checked,
     };
-    if ($("selMode").value === "unicast" || $("selMatterMode").value === "unicast") {
+    if (!net.local && ($("selMode").value === "unicast" || $("selMatterMode").value === "unicast")) {
       body.ip = $("inIp").value.trim();
     }
     if (!$("selDevice").disabled) {
@@ -2438,9 +2779,9 @@ $("btnApply").onclick = async () => {
     if (r.ok) {
       note.className = "settings-note ok";
       note.textContent = d.message;
-      fillModeOptions("selMode", body.protocol, body.mode);
-      fillModeOptions("selMatterMode", body.matter_protocol, body.matter_mode);
-      $("selInterface").value = body.interface;
+      fillModeOptions("selMode", body.protocol, destModeFromMeta(body.protocol, body.mode));
+      fillModeOptions("selMatterMode", body.matter_protocol, destModeFromMeta(body.matter_protocol, body.matter_mode));
+      $("selInterface").value = net.local ? "localhost" : (body.interface || "");
       if (body.ip !== undefined) $("inIp").value = body.ip;
       syncDecayLabel();
       syncBpmDivider();

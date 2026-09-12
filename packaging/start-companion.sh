@@ -17,7 +17,13 @@ for _ in $(seq 1 45); do
   sleep 2
 done
 
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  PY="$ROOT/.venv/bin/python"
+else
+  PY="$(command -v python3)"
+fi
+
 cd "$ROOT"
 exec /usr/bin/flock -n "$LOCK" \
-  "$ROOT/.venv/bin/python" -m magicq_companion --ui --config "$ROOT/config.toml" \
+  "$PY" -m magicq_companion --ui --config "$ROOT/config.toml" \
   >>"$LOG" 2>&1

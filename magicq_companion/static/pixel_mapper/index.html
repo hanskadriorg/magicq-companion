@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChamSys Pixel Grid Mapper</title>
+  <base href="/pixel-mapper/" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>ChamSys Pixel Grid Mapper</h1>
+      <p class="subtitle">Design fixture grids (lines and matrices) and export MagicQ <code>grid*.csv</code> files</p>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <section class="panel">
+          <h2>Grid</h2>
+          <div class="field-row">
+            <label>
+              Width
+              <input type="number" id="grid-width" min="1" max="512" value="40" />
+            </label>
+            <label>
+              Height
+              <input type="number" id="grid-height" min="1" max="512" value="20" />
+            </label>
+          </div>
+          <button type="button" id="apply-grid" class="btn secondary">Apply grid size</button>
+          <button type="button" id="new-grid" class="btn danger">Start new grid</button>
+          <div class="checkbox-row">
+            <label class="checkbox">
+              <input type="checkbox" id="snap-grid" checked />
+              Snap to grid
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="snap-fixtures" checked />
+              Snap to fixtures
+            </label>
+          </div>
+          <p class="hint">Fixture snap aligns start points on the same row or column — fixtures can still touch edge-to-edge.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Add fixture</h2>
+          <label>
+            Head number
+            <input type="number" id="head-number" min="1" value="1" />
+          </label>
+          <label>
+            Pixels
+            <input type="number" id="pixel-count" min="1" max="512" value="10" />
+          </label>
+          <button type="button" id="add-fixture" class="btn primary">+ Add line fixture</button>
+        </section>
+
+        <section class="panel">
+          <h2>Matrix fixture</h2>
+          <p class="hint">Build 2D pixel matrices (panels, tiles). Pixel 1 is the green dot on the grid.</p>
+          <div class="field-row">
+            <label>
+              Pixel width
+              <input type="number" id="matrix-width" min="1" max="64" value="4" />
+            </label>
+            <label>
+              Pixel height
+              <input type="number" id="matrix-height" min="1" max="64" value="3" />
+            </label>
+          </div>
+          <p class="matrix-subhead">Pixel order</p>
+          <div class="pixel-order-grid" id="pixel-order-grid">
+            <button type="button" class="order-option" data-order="row-lr" title="Each row left to right">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell-start"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">1</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">2</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">3</text><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">4</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">6</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">7</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">9</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">10</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">11</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Rows L→R</span>
+            </button>
+            <button type="button" class="order-option" data-order="row-rl" title="Each row right to left">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell-start"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">1</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">2</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">3</text><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">4</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">6</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">7</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">9</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">10</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">11</text><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Rows R→L</span>
+            </button>
+            <button type="button" class="order-option selected" data-order="row-snake-lr" title="Zig-zag rows, start top-left">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell-start"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">1</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">2</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">3</text><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">4</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">6</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">7</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">9</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">10</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">11</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Snake rows</span>
+            </button>
+            <button type="button" class="order-option" data-order="row-snake-rl" title="Zig-zag rows, start top-right">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell-start"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">1</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">2</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">3</text><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">4</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">6</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">7</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">9</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">10</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">11</text><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Snake rows ↩</span>
+            </button>
+            <button type="button" class="order-option" data-order="col-tb" title="Each column top to bottom">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell-start"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">1</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">2</text><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">3</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">4</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">6</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">7</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">9</text><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">10</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">11</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Cols T→B</span>
+            </button>
+            <button type="button" class="order-option" data-order="col-bt" title="Each column bottom to top">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell-start"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">1</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">2</text><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">3</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">4</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">6</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">7</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">9</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">10</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">11</text><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Cols B→T</span>
+            </button>
+            <button type="button" class="order-option" data-order="col-snake-tb" title="Zig-zag columns, start top-left">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell-start"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">1</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">2</text><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">3</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">4</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">6</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">7</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">9</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">10</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">11</text><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Snake cols</span>
+            </button>
+            <button type="button" class="order-option" data-order="col-snake-bt" title="Zig-zag columns, start bottom-left">
+              <svg viewBox="0 0 40 31" width="40" height="31" aria-hidden="true"><rect x="2" y="20" width="8" height="8" rx="1" class="order-cell-start"/><text x="6" y="27" text-anchor="middle" class="order-cell-num">1</text><rect x="2" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="18" text-anchor="middle" class="order-cell-num">2</text><rect x="2" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="6" y="9" text-anchor="middle" class="order-cell-num">3</text><rect x="11" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="9" text-anchor="middle" class="order-cell-num">4</text><rect x="11" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="18" text-anchor="middle" class="order-cell-num">5</text><rect x="11" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="15" y="27" text-anchor="middle" class="order-cell-num">6</text><rect x="20" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="27" text-anchor="middle" class="order-cell-num">7</text><rect x="20" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="18" text-anchor="middle" class="order-cell-num">8</text><rect x="20" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="24" y="9" text-anchor="middle" class="order-cell-num">9</text><rect x="29" y="2" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="9" text-anchor="middle" class="order-cell-num">10</text><rect x="29" y="11" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="18" text-anchor="middle" class="order-cell-num">11</text><rect x="29" y="20" width="8" height="8" rx="1" class="order-cell"/><text x="33" y="27" text-anchor="middle" class="order-cell-num">12</text></svg>
+              <span class="order-option-label">Snake cols ↩</span>
+            </button>
+          </div>
+          <div id="matrix-order-preview" class="matrix-order-preview"></div>
+          <label>
+            Saved fixtures
+            <select id="matrix-template-select"></select>
+          </label>
+          <div class="btn-row">
+            <button type="button" id="save-matrix-template" class="btn secondary">Save…</button>
+            <button type="button" id="delete-matrix-template" class="btn secondary">Delete</button>
+          </div>
+          <button type="button" id="add-matrix-fixture" class="btn primary">+ Add matrix fixture</button>
+        </section>
+
+        <section class="panel">
+          <h2>Heads on grid <span class="badge" id="fixture-count">0</span></h2>
+          <ul class="fixture-list" id="fixture-list">
+            <li class="fixture-list-empty">No fixtures yet</li>
+          </ul>
+        </section>
+
+        <section class="panel" id="selected-panel" hidden>
+          <h2>Selected fixture</h2>
+          <p class="meta" id="selected-meta"></p>
+          <label>
+            Head number
+            <input type="number" id="edit-head-number" min="1" />
+          </label>
+          <div class="btn-row">
+            <button type="button" id="rotate-fixture" class="btn secondary">Rotate 45°</button>
+            <button type="button" id="delete-fixture" class="btn danger">Delete</button>
+          </div>
+          <button type="button" id="focus-fixture" class="btn secondary">Focus view</button>
+        </section>
+
+        <section class="panel">
+          <h2>Import / Export</h2>
+          <input type="file" id="import-csv-input" accept=".csv,text/csv" hidden />
+          <button type="button" id="import-csv" class="btn secondary">Import CSV…</button>
+          <label>
+            Grid file name
+            <input type="text" id="export-filename" value="grid101.csv" />
+          </label>
+          <p class="hint">Group grid 1 → <code>grid101.csv</code>, group 2 → <code>grid102.csv</code>. Import and export remember your last folder.</p>
+          <button type="button" id="export-csv" class="btn primary">Export CSV…</button>
+        </section>
+
+        <section class="panel help">
+          <h2>Controls</h2>
+          <ul>
+            <li>Scroll wheel or <kbd>+</kbd> / <kbd>-</kbd> — zoom</li>
+            <li>Arrow keys — pan view</li>
+            <li>Middle-drag or Space+drag — pan with mouse</li>
+            <li>Drag on empty grid — box-select fixtures</li>
+            <li>Head list — Shift/Ctrl+click for multi-select</li>
+            <li><kbd>A</kbd> select all · double <kbd>A</kbd> select none</li>
+            <li><kbd>E</kbd> then <kbd>H</kbd> / <kbd>V</kbd> — even spacing horizontal / vertical</li>
+            <li>Click fixture — rotate 45° (single selection)</li>
+            <li>Double-click — edit head number</li>
+            <li><kbd>F</kbd> or Focus button — fit selected in view</li>
+            <li>Green dot — pixel 1 (LED start)</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="canvas-wrap" id="canvas-wrap">
+        <div class="canvas-toolbar">
+          <span id="zoom-label">100%</span>
+          <button type="button" id="zoom-fit" class="btn small">Fit</button>
+          <button type="button" id="zoom-reset" class="btn small">100%</button>
+        </div>
+        <div id="kbd-hint" class="kbd-hint" hidden></div>
+        <svg id="grid-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener("error", function(e) {
+      var d = document.createElement("div");
+      d.style.cssText = "position:fixed;top:0;left:0;right:0;background:#c00;color:#fff;padding:8px;font:14px monospace;z-index:9999;white-space:pre-wrap";
+      d.textContent = "JS ERROR: " + (e.message || e) + "\n" + (e.filename ? e.filename + ":" + e.lineno : "");
+      document.body.appendChild(d);
+    });
+    window.addEventListener("unhandledrejection", function(e) {
+      var d = document.createElement("div");
+      d.style.cssText = "position:fixed;top:0;left:0;right:0;background:#900;color:#fff;padding:8px;font:14px monospace;z-index:9999;white-space:pre-wrap";
+      d.textContent = "MODULE ERROR: " + (e.reason?.message || e.reason || e);
+      document.body.appendChild(d);
+    });
+  </script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

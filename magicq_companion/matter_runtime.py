@@ -105,6 +105,7 @@ class MatterSidecar:
         self.port = _SIDECAR_PORT
         self.last_error = ""
         self._wanted = False
+        self._adopted = False
         self._start_kwargs: dict = {}
         self._watch_stop = threading.Event()
         self._watch_thread: threading.Thread | None = None
@@ -118,10 +119,12 @@ class MatterSidecar:
         return self.proc is not None and self.proc.poll() is None
 
     def available(self) -> bool:
-        return self.running() or self._health_ok()
+        return self.running() or self._adopted or self._health_ok()
 
     def status_label(self, *, probe: bool = False) -> str:
-        if self.running() or (probe and self._health_ok()):
+        if self.running() or self._adopted:
+            return "running"
+        if probe and self._adopt_if_healthy():
             return "running"
         if self._wanted:
             return self.last_error or "starting…"
@@ -143,10 +146,12 @@ class MatterSidecar:
     def _watch(self) -> None:
         fails = 0
         while self._wanted and not self._watch_stop.is_set():
-            if self.running():
+            if self.running() or self._adopt_if_healthy():
                 fails = 0
+                self.last_error = ""
                 self._watch_stop.wait(4)
                 continue
+            self._adopted = False
             print("[matter] sidecar is down, restarting…")
             try:
                 self.start(**self._start_kwargs)
@@ -185,14 +190,16 @@ class MatterSidecar:
     ) -> None:
         self.port = port
         self.last_error = ""
-        if self.running() and self._health_ok():
+        if self._adopt_if_healthy():
             print(f"[matter] sidecar already listening on {self.base_url}")
             return
         if self.proc is not None:
             self._stop_process()
-            self._free_matter_ports()
-        if self._health_ok():
+        if not self._health_ok():
             self._free_port(port)
+        if self._adopt_if_healthy():
+            print(f"[matter] sidecar already listening on {self.base_url}")
+            return
         root = sidecar_dir()
         if not (root / "package.json").is_file():
             self.last_error = f"Matter sidecar missing at {root}"
@@ -223,8 +230,8 @@ class MatterSidecar:
         env["PORT"] = str(port)
         env["DATA_DIR"] = str(data_dir)
         env["PYTHON_DMX_URL"] = python_dmx_url
-        if interface:
-            env["MATTER_MDNS_NETWORK_INTERFACE"] = interface
+        if interface and interface.strip().lower() not in ("localhost", "lo", "127.0.0.1"):
+            env["MATTER_MDNS_NETWORK_INTERFACE"] = interface.strip()
         else:
             env.pop("MATTER_MDNS_NETWORK_INTERFACE", None)
         self.proc = subprocess.Popen(  # noqa: S603
@@ -236,6 +243,11 @@ class MatterSidecar:
         )
         threading.Thread(target=self._pump_logs, daemon=True).start()
         if not self._wait_until_ready(timeout=20):
+            if self._adopt_if_healthy():
+                if self.proc is not None and self.proc.poll() is not None:
+                    self.proc = None
+                print(f"[matter] sidecar already listening on {self.base_url}")
+                return
             code = self.proc.poll() if self.proc else None
             if self.proc is not None and code is None:
                 print(
@@ -250,6 +262,8 @@ class MatterSidecar:
             )
             print(f"[matter] {self.last_error}")
             return
+        self._adopted = False
+        self.last_error = ""
         print(f"[matter] sidecar pid {self.proc.pid} on {self.base_url}")
 
     def restart(self, **kwargs) -> None:
@@ -257,6 +271,8 @@ class MatterSidecar:
         if kwargs:
             self._start_kwargs.update(kwargs)
         self._stop_process()
+        if not self._health_ok():
+            self._free_port(int(self._start_kwargs.get("port") or self.port))
         if wanted or kwargs:
             self._wanted = True
             self.start(**self._start_kwargs)
@@ -307,6 +323,13 @@ class MatterSidecar:
         except (urllib.error.URLError, TimeoutError, OSError):
             return False
 
+    def _adopt_if_healthy(self) -> bool:
+        if not self._health_ok():
+            return False
+        self._adopted = True
+        self.last_error = ""
+        return True
+
     def push_output_state(self, enabled: bool) -> None:
         """Mirror the dashboard output toggle onto companion-output switches.
 
@@ -337,10 +360,10 @@ class MatterSidecar:
     def _wait_until_ready(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self.proc is not None and self.proc.poll() is not None:
-                return False
             if self._health_ok():
                 return True
+            if self.proc is not None and self.proc.poll() is not None:
+                return False
             time.sleep(0.2)
         return False
 

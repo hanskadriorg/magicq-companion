@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +31,7 @@ class ArtNetConfig:
     fps: int = 40
     # sACN packet priority (0–200). Higher wins when multiple sources collide.
     priority: int = 100
-    # Dashboard Art-Net/sACN output switch. Persisted across restarts.
+    # Live dashboard Output switch. Boot / process start uses [server] startup_output.
     enabled: bool = True
 
 
@@ -253,6 +254,98 @@ class UiConfig:
     visualizer_mode: str = "auto"
 
 
+REBOOT_DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+REBOOT_DAY_CRON = {
+    "mon": "1",
+    "tue": "2",
+    "wed": "3",
+    "thu": "4",
+    "fri": "5",
+    "sat": "6",
+    "sun": "0",
+}
+_REBOOT_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})(?::\d{2})?$")
+_REBOOT_DAY_ALIASES = {
+    "monday": "mon",
+    "mon": "mon",
+    "1": "mon",
+    "tuesday": "tue",
+    "tue": "tue",
+    "2": "tue",
+    "wednesday": "wed",
+    "wed": "wed",
+    "3": "wed",
+    "thursday": "thu",
+    "thu": "thu",
+    "thur": "thu",
+    "thurs": "thu",
+    "4": "thu",
+    "friday": "fri",
+    "fri": "fri",
+    "5": "fri",
+    "saturday": "sat",
+    "sat": "sat",
+    "6": "sat",
+    "sunday": "sun",
+    "sun": "sun",
+    "0": "sun",
+    "7": "sun",
+}
+
+
+def try_reboot_time(value: object) -> str | None:
+    raw = str(value or "").strip()
+    match = _REBOOT_TIME_RE.fullmatch(raw)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def parse_reboot_time(value: object) -> str:
+    return try_reboot_time(value) or "14:00"
+
+
+def coerce_reboot_days(value: object) -> list[str]:
+    if isinstance(value, str):
+        parts = [p.strip().lower() for p in value.replace(";", ",").split(",") if p.strip()]
+    elif isinstance(value, (list, tuple)):
+        parts = [str(p).strip().lower() for p in value if str(p).strip()]
+    else:
+        parts = ["mon", "tue", "wed", "thu", "fri"]
+    seen: set[str] = set()
+    for part in parts:
+        name = _REBOOT_DAY_ALIASES.get(part)
+        if name:
+            seen.add(name)
+    return [day for day in REBOOT_DAY_NAMES if day in seen]
+
+
+def reboot_cron_dow(days: list[str]) -> str:
+    names = coerce_reboot_days(days)
+    if len(names) == 7:
+        return "*"
+    return ",".join(REBOOT_DAY_CRON[day] for day in names)
+
+
+def _default_reboot_days() -> list[str]:
+    return ["mon", "tue", "wed", "thu", "fri"]
+
+
+@dataclass
+class ServerConfig:
+    """Host defaults from the dashboard Server settings modal."""
+
+    # Output switch after a process start or host reboot. Not the live toggle.
+    startup_output: bool = True
+    reboot_enabled: bool = False
+    reboot_time: str = "14:00"
+    reboot_days: list[str] = field(default_factory=_default_reboot_days)
+
+
 @dataclass
 class BpmRateConfig:
     """How energy maps onto DMX channel 14 (bpm_rate)."""
@@ -276,6 +369,7 @@ class Config:
     build_score: BuildScoreConfig = field(default_factory=BuildScoreConfig)
     bpm_rate: BpmRateConfig = field(default_factory=BpmRateConfig)
     ui: UiConfig = field(default_factory=UiConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
 
 
 _SECTIONS = {
@@ -288,6 +382,7 @@ _SECTIONS = {
     "build_score": BuildScoreConfig,
     "bpm_rate": BpmRateConfig,
     "ui": UiConfig,
+    "server": ServerConfig,
 }
 
 
@@ -336,6 +431,10 @@ def load_config(path: str | Path | None) -> Config:
     cfg.detection.silence_timeout_seconds = max(
         30.0, float(cfg.detection.silence_timeout_seconds)
     )
+    cfg.server.startup_output = bool(cfg.server.startup_output)
+    cfg.server.reboot_enabled = bool(cfg.server.reboot_enabled)
+    cfg.server.reboot_time = parse_reboot_time(cfg.server.reboot_time)
+    cfg.server.reboot_days = coerce_reboot_days(cfg.server.reboot_days)
     try:
         cfg.detection.four_four_intensity = max(
             0.0, min(1.0, float(cfg.detection.four_four_intensity))

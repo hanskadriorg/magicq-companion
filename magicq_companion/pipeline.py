@@ -83,6 +83,7 @@ class Bridge:
                             self.cfg.channels,
                             self.features,
                             self.tracker,
+                            self.cfg.detection,
                         )
                     else:
                         self.dmx[:] = b"\x00" * len(self.dmx)

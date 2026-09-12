@@ -20,7 +20,7 @@ class ArtNetConfig:
     # Network DMX output (section name kept as [artnet] for compatibility).
     # protocol: "artnet" | "sacn"
     protocol: str = "artnet"
-    # mode: Art-Net = unicast|broadcast; sACN = unicast|multicast.
+    # mode: Art-Net = unicast|broadcast|localhost; sACN = unicast|multicast|localhost.
     mode: str = "unicast"
     # Local NIC to send from ("" = system default). Name like "eth0".
     interface: str = ""
@@ -111,6 +111,9 @@ class DetectionConfig:
     drop_min_bass: float = 0.70
     # How long we must already be in the current section (0 = immediate).
     drop_min_state_seconds: float = 0.15
+    # Channel 9: hold 255 this long after DROP starts, then fade to 0.
+    drop_hit_seconds: float = 0.15
+    drop_hit_fade_seconds: float = 0.0
     # Energy/bass smoothing for drop sensing (smaller = faster, twitchier).
     drop_smooth_seconds: float = 0.08
     # Allow a drop hit while still labelled GROOVE (short/no build).
@@ -357,6 +360,18 @@ def load_config(path: str | Path | None) -> Config:
         )
     except (TypeError, ValueError):
         cfg.detection.breakdown_beats = 4.0
+    try:
+        cfg.detection.drop_hit_seconds = max(
+            0.0, min(5.0, float(cfg.detection.drop_hit_seconds))
+        )
+    except (TypeError, ValueError):
+        cfg.detection.drop_hit_seconds = 0.15
+    try:
+        cfg.detection.drop_hit_fade_seconds = max(
+            0.0, min(5.0, float(cfg.detection.drop_hit_fade_seconds))
+        )
+    except (TypeError, ValueError):
+        cfg.detection.drop_hit_fade_seconds = 0.0
     return cfg
 
 

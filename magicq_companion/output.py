@@ -10,9 +10,9 @@ from .netif import interface_info, list_ipv4_interfaces
 from .sacn import SacnSender, sacn_multicast_ip
 
 OUTPUT_PROTOCOLS = ("artnet", "sacn")
-OUTPUT_MODES = ("unicast", "broadcast", "multicast")
-ARTNET_MODES = ("unicast", "broadcast")
-SACN_MODES = ("unicast", "multicast")
+OUTPUT_MODES = ("unicast", "broadcast", "multicast", "localhost")
+ARTNET_MODES = ("unicast", "broadcast", "localhost")
+SACN_MODES = ("unicast", "multicast", "localhost")
 
 
 class DmxSender(Protocol):
@@ -37,6 +37,8 @@ def coerce_mode(protocol: str, mode: str | None) -> str:
     m = (mode or "").lower()
     if m in allowed:
         return m
+    if m == "localhost":
+        return "localhost"
     if protocol == "sacn":
         return "multicast" if m == "broadcast" else "unicast"
     return "broadcast" if m == "multicast" else "unicast"
@@ -85,7 +87,9 @@ def describe_output(cfg: ArtNetConfig) -> str:
         port = 6454
 
     iface = interface_info(cfg.interface) if cfg.interface else None
-    if protocol == "sacn" and mode == "multicast":
+    if mode == "localhost":
+        dest = f"127.0.0.1:{port}"
+    elif protocol == "sacn" and mode == "multicast":
         uni = max(1, int(cfg.universe) or 1)
         dest = f"{sacn_multicast_ip(uni)}:{port}"
     elif mode == "broadcast":

@@ -540,13 +540,13 @@
         <span class="knob"></span>
         <span id="lblEnableText">Output on</span>
       </label>
-      <label class="toggle on" id="lblViz" title="Stop computing the spectrum on the Pi (saves RAM)">
+      <label class="toggle on" id="lblViz" title="Stop computing the spectrum (saves RAM)">
         <input type="checkbox" id="chkViz" checked>
         <span class="knob"></span>
         <span id="lblVizText">Visualizer on</span>
       </label>
-      <button type="button" class="reboot" id="btnReboot" title="Reboot this machine (Raspberry Pi)">Reboot</button>
-      <button type="button" class="stop" id="btnStop" title="Stop the server and free the port">Stop server</button>
+      <button type="button" class="reboot" id="btnReboot" title="Reboot this computer">Reboot device</button>
+      <button type="button" class="stop" id="btnRestart" title="Restart Companion without rebooting the computer">Restart companion</button>
     </div>
   </header>
 
@@ -604,6 +604,7 @@
         <div class="actions">
           <button type="button" class="secondary" id="btnBuildSettings" title="How a build-up is detected and held">Build settings…</button>
           <button type="button" class="secondary" id="btnDropSettings" title="How a drop is detected and held">Drop settings…</button>
+          <button type="button" class="secondary" id="btnDropHitSettings" title="How long the drop-hit channel stays full, then fades">Drop hit settings…</button>
           <button type="button" class="secondary" id="btnBreakdownSettings" title="How a breakdown is detected">Breakdown settings…</button>
           <button type="button" class="secondary" id="btnFourFourSettings" title="How the 4/4 lock on channel 11 is detected">4/4 settings…</button>
         </div>
@@ -824,7 +825,7 @@
     <div class="settings" style="margin-top:12px">
       <div class="actions">
         <button type="button" class="secondary" id="btnBuildSettingsCancel">Close</button>
-        <button type="button" id="btnBuildSettingsSave">Save on Pi</button>
+        <button type="button" id="btnBuildSettingsSave">Save</button>
       </div>
     </div>
   </div>
@@ -870,7 +871,7 @@
       </label>
       <label class="slider-label">Min time in section
         <span class="field-help">Wait this long in the current section before another drop can fire. Cuts double-triggers.</span>
-        <input type="range" id="rngDropMinState" min="0" max="2" step="0.05" value="0.15">
+        <input type="range" id="rngDropMinState" min="0" max="30" step="0.05" value="0.15">
         <span class="slider-val" id="lblDropMinState">0.15 s</span>
       </label>
       <label class="slider-label">Smoothing
@@ -893,7 +894,35 @@
     <div class="settings" style="margin-top:12px">
       <div class="actions">
         <button type="button" class="secondary" id="btnDropSettingsCancel">Close</button>
-        <button type="button" id="btnDropSettingsSave">Save on Pi</button>
+        <button type="button" id="btnDropSettingsSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="dropHitSettingsModal">
+  <div class="modal" role="dialog" aria-labelledby="dropHitSettingsTitle">
+    <h3 id="dropHitSettingsTitle">Drop hit settings</h3>
+    <p class="hint">
+      Channel 9 goes to 255 at the instant DROP starts. Hold is how long it stays full; fade is how long it then ramps to 0.
+    </p>
+    <div class="settings">
+      <label class="slider-label">Hit length
+        <span class="field-help">Seconds at 255 after DROP starts. 0 starts the fade immediately.</span>
+        <input type="range" id="rngDropHitHold" min="0" max="5" step="0.05" value="0.15">
+        <span class="slider-val" id="lblDropHitHold">0.15 s</span>
+      </label>
+      <label class="slider-label">Fade out
+        <span class="field-help">After the hit length, fade from 255 to 0 over this many seconds. 0 cuts to 0.</span>
+        <input type="range" id="rngDropHitFade" min="0" max="5" step="0.05" value="0">
+        <span class="slider-val" id="lblDropHitFade">0 s (cut)</span>
+      </label>
+    </div>
+    <div class="settings-note" id="dropHitSettingsNote"></div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnDropHitSettingsCancel">Close</button>
+        <button type="button" id="btnDropHitSettingsSave">Save</button>
       </div>
     </div>
   </div>
@@ -921,7 +950,7 @@
     <div class="settings" style="margin-top:12px">
       <div class="actions">
         <button type="button" class="secondary" id="btnBreakdownSettingsCancel">Close</button>
-        <button type="button" id="btnBreakdownSettingsSave">Save on Pi</button>
+        <button type="button" id="btnBreakdownSettingsSave">Save</button>
       </div>
     </div>
   </div>
@@ -950,7 +979,7 @@
     <div class="settings" style="margin-top:12px">
       <div class="actions">
         <button type="button" class="secondary" id="btnFourFourSettingsCancel">Close</button>
-        <button type="button" id="btnFourFourSettingsSave">Save on Pi</button>
+        <button type="button" id="btnFourFourSettingsSave">Save</button>
       </div>
     </div>
   </div>
@@ -1530,6 +1559,20 @@ function syncDropSettingsLabels() {
   $("lblDropSmooth").textContent = Number($("rngDropSmooth").value).toFixed(2) + " s";
 }
 
+function syncDropHitLabels() {
+  const hold = Number($("rngDropHitHold").value);
+  const fade = Number($("rngDropHitFade").value);
+  $("lblDropHitHold").textContent = hold <= 0 ? "0 s (fade starts now)" : hold.toFixed(2) + " s";
+  $("lblDropHitFade").textContent = fade <= 0 ? "0 s (cut)" : fade.toFixed(2) + " s";
+}
+
+function fillDropHitForm(meta) {
+  if (!meta) return;
+  if (meta.drop_hit_seconds != null) $("rngDropHitHold").value = String(meta.drop_hit_seconds);
+  if (meta.drop_hit_fade_seconds != null) $("rngDropHitFade").value = String(meta.drop_hit_fade_seconds);
+  syncDropHitLabels();
+}
+
 function syncFourFourLabels() {
   $("lblFourFourIntensity").textContent = fmtIntensity($("rngFourFourIntensity").value, "easier lock");
   const n = Number($("rngFourFourSmooth").value);
@@ -1985,8 +2028,8 @@ function fillInterfaceSelect(ifaces, preferred) {
 function fillModeOptions(sel, protocol, preferred) {
   if (typeof sel === "string") sel = $(sel);
   const modes = protocol === "sacn"
-    ? [["unicast", "Unicast"], ["multicast", "Multicast"]]
-    : [["unicast", "Unicast"], ["broadcast", "Broadcast"]];
+    ? [["unicast", "Unicast"], ["multicast", "Multicast"], ["localhost", "Localhost"]]
+    : [["unicast", "Unicast"], ["broadcast", "Broadcast"], ["localhost", "Localhost"]];
   const want = modes.some(m => m[0] === preferred) ? preferred : modes[0][0];
   sel.innerHTML = "";
   for (const [value, label] of modes) {
@@ -2005,7 +2048,7 @@ function syncOutputLabels() {
   $("lblIp").style.display = unicast ? "" : "none";
   $("inIp").disabled = !unicast;
   $("lblIpText").textContent = "Unicast IP (shared)";
-  $("inIp").placeholder = "e.g. 192.168.1.100";
+  $("inIp").placeholder = "e.g. 192.168.1.100 or 127.0.0.1";
   $("lblPriority").style.opacity = proto === "sacn" ? "1" : "0.45";
   $("inPriority").disabled = proto !== "sacn";
   $("lblMatterPriority").style.opacity = matterProto === "sacn" ? "1" : "0.45";
@@ -2072,6 +2115,7 @@ function applyMetaToForm(meta, devices, interfaces) {
   fillDropForm(meta);
   fillFourFourForm(meta);
   fillBreakdownForm(meta);
+  fillDropHitForm(meta);
   if (meta.noise_floor_db != null) setNoiseFloorUI(meta.noise_floor_db);
   setVizModeUI(meta.visualizer_mode || "auto");
   if (meta.style) $("selStyle").value = meta.style;
@@ -2191,12 +2235,15 @@ $("rngFourFourIntensity").oninput = syncFourFourLabels;
 $("rngFourFourSmooth").oninput = syncFourFourLabels;
 $("rngBreakdownIntensity").oninput = syncBreakdownLabels;
 $("rngBreakdownBeats").oninput = syncBreakdownLabels;
+$("rngDropHitHold").oninput = syncDropHitLabels;
+$("rngDropHitFade").oninput = syncDropHitLabels;
 syncDecayLabel();
 syncBpmDivider();
 syncBuildLabels();
 syncDropSettingsLabels();
 syncFourFourLabels();
 syncBreakdownLabels();
+syncDropHitLabels();
 
 async function postSettings(body, noteEl, okText) {
   const note = $(noteEl);
@@ -2231,6 +2278,7 @@ wireModal("buildSettingsModal", "btnBuildSettings", "btnBuildSettingsCancel");
 wireModal("dropSettingsModal", "btnDropSettings", "btnDropSettingsCancel");
 wireModal("fourFourSettingsModal", "btnFourFourSettings", "btnFourFourSettingsCancel");
 wireModal("breakdownSettingsModal", "btnBreakdownSettings", "btnBreakdownSettingsCancel");
+wireModal("dropHitSettingsModal", "btnDropHitSettings", "btnDropHitSettingsCancel");
 $("btnBuildSettingsSave").onclick = () => postSettings({
   build_intensity: Number($("rngBuildIntensity").value) / 100,
   build_decay_seconds: Number($("rngBuildDecay").value),
@@ -2248,6 +2296,10 @@ $("btnBreakdownSettingsSave").onclick = () => postSettings({
   breakdown_intensity: Number($("rngBreakdownIntensity").value) / 100,
   breakdown_beats: Number($("rngBreakdownBeats").value),
 }, "breakdownSettingsNote", "Breakdown settings saved");
+$("btnDropHitSettingsSave").onclick = () => postSettings({
+  drop_hit_seconds: Number($("rngDropHitHold").value),
+  drop_hit_fade_seconds: Number($("rngDropHitFade").value),
+}, "dropHitSettingsNote", "Drop hit settings saved");
 wireWindows();
 wireHeroPanes();
 applyLayout(layout);
@@ -2406,34 +2458,31 @@ $("btnApply").onclick = async () => {
 };
 
 $("btnReboot").onclick = async () => {
-  if (!confirm("Reboot this machine now?")) return;
+  if (!confirm("Reboot this computer now? Companion and everything else will go down.")) return;
   const btn = $("btnReboot");
   btn.disabled = true;
   btn.textContent = "Rebooting\u2026";
   try {
     await fetch("/reboot", { method: "POST" });
     $("offline").style.display = "block";
-    $("offline").textContent = "Rebooting\u2026 page will reconnect when the Pi is back.";
+    $("offline").textContent = "Rebooting the device\u2026 page will reconnect when it is back.";
   } catch (e) {
     $("offline").style.display = "block";
-    $("offline").textContent = "Reboot requested. Waiting for the machine\u2026";
+    $("offline").textContent = "Device reboot requested. Waiting for the machine\u2026";
   }
 };
 
-$("btnStop").onclick = async () => {
-  if (!confirm("Stop the bridge server and free the port?")) return;
-  const btn = $("btnStop");
+$("btnRestart").onclick = async () => {
+  if (!confirm("Restart Companion? The computer stays on.")) return;
+  const btn = $("btnRestart");
   btn.disabled = true;
-  btn.textContent = "Stopping\u2026";
+  btn.textContent = "Restarting\u2026";
+  $("offline").style.display = "block";
+  $("offline").textContent = "Restarting Companion\u2026 the page will reconnect.";
   try {
-    await fetch("/shutdown", { method: "POST" });
-    $("offline").style.display = "block";
-    $("offline").textContent = "Server stopped. You can close this tab.";
-    $("settingsNote").className = "settings-note";
-    $("settingsNote").textContent = "Server stopped.";
+    await fetch("/restart", { method: "POST" });
   } catch (e) {
-    $("offline").style.display = "block";
-    $("offline").textContent = "Server stopped. You can close this tab.";
+    /* the process exits; reconnect handles the rest */
   }
 };
 
@@ -2450,10 +2499,8 @@ function connect() {
     update(s);
   };
   ws.onclose = () => {
-    if ($("btnStop").textContent.indexOf("Stopping") === -1) {
-      $("offline").style.display = "block";
-      setTimeout(connect, 1500);
-    }
+    $("offline").style.display = "block";
+    setTimeout(connect, 1500);
   };
 }
 

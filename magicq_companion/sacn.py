@@ -46,22 +46,31 @@ class SacnSender:
         # sACN universes are 1..63999 (0 is reserved).
         self.universe = max(1, min(63999, int(universe) or 1))
         self.priority = max(0, min(200, int(priority)))
-        self.mode = "unicast" if (mode or "").lower() == "unicast" else "multicast"
+        raw_mode = (mode or "").lower()
+        if raw_mode == "localhost":
+            self.mode = "localhost"
+        elif raw_mode == "unicast":
+            self.mode = "unicast"
+        else:
+            self.mode = "multicast"
         self.port = int(port) if port else _DEFAULT_PORT
         self._sequence = 0
         self._cid = uuid.uuid4().bytes
         name = source_name.encode("utf-8")[:63]
         self._source_name = name + b"\x00" * (64 - len(name))
 
-        dest_ip = ip or "127.0.0.1" if self.mode == "unicast" else sacn_multicast_ip(
-            self.universe
-        )
+        if self.mode == "localhost":
+            dest_ip = "127.0.0.1"
+        elif self.mode == "unicast":
+            dest_ip = ip or "127.0.0.1"
+        else:
+            dest_ip = sacn_multicast_ip(self.universe)
 
         self.address = (dest_ip, self.port)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if self.mode == "multicast":
             self._socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 8)
-        if interface:
+        if interface and self.mode != "localhost":
             bind_to_interface(
                 self._socket, interface, multicast=self.mode == "multicast"
             )

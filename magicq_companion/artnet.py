@@ -24,12 +24,19 @@ class ArtNetSender:
         interface: str = "",
     ) -> None:
         self.universe = max(0, min(32767, int(universe)))
-        self.mode = "broadcast" if (mode or "").lower() == "broadcast" else "unicast"
+        raw_mode = (mode or "").lower()
+        self.mode = (
+            "broadcast"
+            if raw_mode == "broadcast"
+            else ("localhost" if raw_mode == "localhost" else "unicast")
+        )
         self.port = int(port) if port else _DEFAULT_PORT
         self._sequence = 0
 
         info = interface_info(interface) if interface else None
-        if self.mode == "broadcast":
+        if self.mode == "localhost":
+            dest = "127.0.0.1"
+        elif self.mode == "broadcast":
             dest = (
                 info["broadcast"]
                 if info
@@ -46,7 +53,7 @@ class ArtNetSender:
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if self.mode == "broadcast":
             self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        if interface:
+        if interface and self.mode != "localhost":
             bind_to_interface(self._socket, interface, multicast=False)
 
     def send(self, dmx: bytes | bytearray) -> None:

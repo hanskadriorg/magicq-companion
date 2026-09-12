@@ -372,11 +372,17 @@ def open_capture(
     mix = input_channel or "left"
     label = device_label or "default device"
     if _is_generic_device_label(device_label) and shutil.which("pw-record"):
-        cap = capture_blocks_subprocess(samplerate, blocksize, "", mix)
-        return cap, f"live input via pw-record ({label}, {mix})"
+        try:
+            cap = capture_blocks_subprocess(samplerate, blocksize, "", mix)
+            return cap, f"live input via pw-record ({label}, {mix})"
+        except Exception:
+            pass
     if pipewire_source_available(device_label):
-        cap = capture_blocks_subprocess(samplerate, blocksize, device_label, mix)
-        return cap, f"live input via pw-record ({label}, {mix})"
+        try:
+            cap = capture_blocks_subprocess(samplerate, blocksize, device_label, mix)
+            return cap, f"live input via pw-record ({label}, {mix})"
+        except Exception:
+            pass
     try:
         device = find_device(device_label)
         cap = capture_blocks(samplerate, blocksize, device, mix)

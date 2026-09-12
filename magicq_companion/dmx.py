@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
-from .config import ChannelMap
+from .config import ChannelMap, DetectionConfig
 from .features import Features
 from .state_machine import Section, SectionTracker
 
-# How long the drop-hit channel stays at 255 after DROP starts.
-# Long enough for MagicQ macros / automations to catch, short enough
-# that it only fires at the impact — not for the whole drop look.
-_DROP_HIT_SECONDS = 0.15
+
+def drop_hit_level(t_in_state: float, hold: float, fade: float) -> float:
+    """255 for `hold` seconds, then a linear fade to 0 over `fade` seconds."""
+    if t_in_state < 0:
+        return 0.0
+    hold_s = max(0.0, float(hold))
+    fade_s = max(0.0, float(fade))
+    if t_in_state < hold_s:
+        return 255.0
+    if fade_s <= 0:
+        return 0.0
+    u = (t_in_state - hold_s) / fade_s
+    if u >= 1.0:
+        return 0.0
+    return 255.0 * (1.0 - u)
 
 
 def build_frame(
@@ -17,6 +28,7 @@ def build_frame(
     channels: ChannelMap,
     features: Features,
     tracker: SectionTracker,
+    detection: DetectionConfig | None = None,
 ) -> None:
     """Write current values into the 512-byte DMX frame (in place)."""
 
@@ -41,10 +53,18 @@ def build_frame(
     # Square 4/4 lock: 255 for the whole time a kick grid is held.
     set_ch(channels.four_four, features.four_four_gate)
 
-    drop_hit = (
-        tracker.state is Section.DROP and tracker.t_in_state < _DROP_HIT_SECONDS
-    )
-    set_ch(channels.drop_hit, 255 if drop_hit else 0)
+    if tracker.state is Section.DROP:
+        try:
+            hold = float(getattr(detection, "drop_hit_seconds", 0.15))
+        except (TypeError, ValueError, AttributeError):
+            hold = 0.15
+        try:
+            fade = float(getattr(detection, "drop_hit_fade_seconds", 0.0))
+        except (TypeError, ValueError, AttributeError):
+            fade = 0.0
+        set_ch(channels.drop_hit, drop_hit_level(tracker.t_in_state, hold, fade))
+    else:
+        set_ch(channels.drop_hit, 0)
     set_ch(channels.bpm_rate, features.bpm_rate)
     # Retired channels (energy / kick / melody) — keep them dark so MagicQ
     # does not hold the last value after a config upgrade.

@@ -453,6 +453,7 @@ def _candidate_bins(name: str) -> list[Path]:
         Path("/usr/bin"),
         Path("/usr/local/bin"),
         Path("/opt/nodejs/bin"),
+        sidecar_dir().parent / ".node" / "bin",
     ]
     for home in unique_homes:
         extra_dirs.extend(

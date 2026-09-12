@@ -13,7 +13,7 @@ ip = "2.0.0.15"
 [artnet]
 # Audio analysis → MagicQ. protocol = "artnet" | "sacn"
 protocol = "artnet"
-# Destination: Art-Net = unicast|broadcast; sACN = unicast|multicast.
+# Destination: Art-Net = unicast|broadcast|localhost; sACN = unicast|multicast|localhost.
 mode = "broadcast"
 # UDP port (Art-Net 6454, sACN 5568). Auto-switched when protocol changes
 # if still at the other protocol's default.
@@ -58,7 +58,7 @@ drop = 4
 build_progress = 5
 # Toggles 0↔255 on every detected kick (hard edges for MagicQ BPM input).
 beat_pulse = 6
-# 255 for ~150 ms only at the instant DROP starts (cue / strobe / macro trigger).
+# 255 at DROP start for drop_hit_seconds, then fades over drop_hit_fade_seconds.
 # Channel 4 stays high for the whole drop look; this one is the impact flash.
 drop_hit = 9
 # 255 while a 4/4 kick grid is locked, 0 when it isn't.
@@ -98,6 +98,8 @@ drop_rise_window = 0.5
 drop_rise = 0.40
 drop_min_bass = 0.70
 drop_min_state_seconds = 0.15
+drop_hit_seconds = 0.15
+drop_hit_fade_seconds = 0.0
 drop_smooth_seconds = 0.08
 drop_from_groove = true
 drop_use_onset = true

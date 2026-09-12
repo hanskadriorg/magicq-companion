@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -47,7 +48,7 @@ _DROP_SENSING_FIELDS = {
     "drop_rise": (0.05, 2.0),
     "drop_energy_jump": (1.05, 3.0),
     "drop_min_bass": (0.10, 2.0),
-    "drop_min_state_seconds": (0.0, 8.0),
+    "drop_min_state_seconds": (0.0, 30.0),
     "drop_smooth_seconds": (0.02, 1.0),
 }
 
@@ -294,6 +295,8 @@ class _Manager:
             "four_four_smooth_seconds": self.cfg.detection.four_four_smooth_seconds,
             "breakdown_intensity": self.cfg.detection.breakdown_intensity,
             "breakdown_beats": self.cfg.detection.breakdown_beats,
+            "drop_hit_seconds": self.cfg.detection.drop_hit_seconds,
+            "drop_hit_fade_seconds": self.cfg.detection.drop_hit_fade_seconds,
             "style": self.cfg.detection.style,
             "silence_gate": bool(self.cfg.detection.silence_gate),
             "silence_timeout_seconds": self.cfg.detection.silence_timeout_seconds,
@@ -511,6 +514,8 @@ class _Manager:
         four_four_smooth_seconds: float | None = None,
         breakdown_intensity: float | None = None,
         breakdown_beats: float | None = None,
+        drop_hit_seconds: float | None = None,
+        drop_hit_fade_seconds: float | None = None,
     ) -> str:
         with self.ctl_lock:
             cfg = self.cfg
@@ -658,6 +663,19 @@ class _Manager:
             ):
                 cfg.detection.breakdown_beats = breakdown_beats
                 breakdown_changed = True
+            drop_hit_changed = False
+            if (
+                drop_hit_seconds is not None
+                and drop_hit_seconds != cfg.detection.drop_hit_seconds
+            ):
+                cfg.detection.drop_hit_seconds = drop_hit_seconds
+                drop_hit_changed = True
+            if (
+                drop_hit_fade_seconds is not None
+                and drop_hit_fade_seconds != cfg.detection.drop_hit_fade_seconds
+            ):
+                cfg.detection.drop_hit_fade_seconds = drop_hit_fade_seconds
+                drop_hit_changed = True
             input_changed = False
             if noise_floor_db is not None:
                 floor = clamp_noise_floor(noise_floor_db)
@@ -684,6 +702,7 @@ class _Manager:
                 and not style_changed
                 and not four_four_changed
                 and not breakdown_changed
+                and not drop_hit_changed
                 and not input_changed
             ):
                 return "No changes to apply."
@@ -756,6 +775,11 @@ class _Manager:
                 parts.append(
                     f"breakdown intensity {cfg.detection.breakdown_intensity:.0%}, "
                     f"{cfg.detection.breakdown_beats:g} beats"
+                )
+            if drop_hit_changed:
+                parts.append(
+                    f"drop hit {cfg.detection.drop_hit_seconds:g}s, "
+                    f"fade {cfg.detection.drop_hit_fade_seconds:g}s"
                 )
             if input_changed:
                 parts.append(
@@ -851,6 +875,8 @@ class _Manager:
             "four_four_smooth_seconds",
             "breakdown_intensity",
             "breakdown_beats",
+            "drop_hit_seconds",
+            "drop_hit_fade_seconds",
             "style",
             "silence_gate",
             "silence_timeout_seconds",
@@ -1033,6 +1059,8 @@ def run_ui(
         four_four_smooth_seconds = body.get("four_four_smooth_seconds")
         breakdown_intensity = body.get("breakdown_intensity")
         breakdown_beats = body.get("breakdown_beats")
+        drop_hit_seconds = body.get("drop_hit_seconds")
+        drop_hit_fade_seconds = body.get("drop_hit_fade_seconds")
         if drop_sensing is not None and not isinstance(drop_sensing, dict):
             return web.json_response({"error": "drop_sensing must be an object"}, status=400)
         if protocol is not None:
@@ -1048,9 +1076,9 @@ def run_ui(
                 return web.json_response(
                     {
                         "error": (
-                            "Art-Net destination must be unicast or broadcast"
+                            "Art-Net destination must be unicast, broadcast, or localhost"
                             if proto_for_mode != "sacn"
-                            else "sACN destination must be unicast or multicast"
+                            else "sACN destination must be unicast, multicast, or localhost"
                         )
                     },
                     status=400,
@@ -1322,6 +1350,28 @@ def run_ui(
                 return web.json_response(
                     {"error": "breakdown_beats must be 1–16"}, status=400
                 )
+        if drop_hit_seconds is not None:
+            try:
+                drop_hit_seconds = float(drop_hit_seconds)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "drop_hit_seconds must be a number"}, status=400
+                )
+            if not 0.0 <= drop_hit_seconds <= 5.0:
+                return web.json_response(
+                    {"error": "drop hit length must be 0–5 seconds"}, status=400
+                )
+        if drop_hit_fade_seconds is not None:
+            try:
+                drop_hit_fade_seconds = float(drop_hit_fade_seconds)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "drop_hit_fade_seconds must be a number"}, status=400
+                )
+            if not 0.0 <= drop_hit_fade_seconds <= 5.0:
+                return web.json_response(
+                    {"error": "drop hit fade must be 0–5 seconds"}, status=400
+                )
         loop = asyncio.get_running_loop()
         try:
             message = await loop.run_in_executor(
@@ -1359,6 +1409,8 @@ def run_ui(
                     four_four_smooth_seconds,
                     breakdown_intensity,
                     breakdown_beats,
+                    drop_hit_seconds,
+                    drop_hit_fade_seconds,
                 ),
             )
         except Exception as exc:  # e.g. unknown device name
@@ -1456,6 +1508,44 @@ def run_ui(
 
         threading.Timer(0.25, _exit).start()
         return web.json_response({"ok": True, "message": "Shutting down…"})
+
+    async def restart_handler(_request: web.Request) -> web.Response:
+        """Restart Companion only — the host stays up."""
+
+        def _restart() -> None:
+            try:
+                manager.stop_all()
+            except Exception:
+                pass
+            root = (
+                Path(manager.config_path).resolve().parent
+                if manager.config_path
+                else Path.cwd()
+            )
+            start = root / "packaging" / "start-companion.sh"
+            config = (
+                str(Path(manager.config_path).resolve())
+                if manager.config_path
+                else str(root / "config.toml")
+            )
+            lock = "/tmp/magicq-companion.lock"
+            if start.is_file():
+                cmd = f"sleep 1; rm -f {lock}; nohup {start} >/dev/null 2>&1 &"
+            else:
+                py = sys.executable
+                cmd = (
+                    f"sleep 1; rm -f {lock}; cd {root}; "
+                    f"nohup {py} -m magicq_companion --ui --config {config} "
+                    f">> {root / 'companion.log'} 2>&1 &"
+                )
+            subprocess.Popen(  # noqa: S603
+                ["bash", "-lc", cmd],
+                start_new_session=True,
+            )
+            os._exit(0)
+
+        threading.Timer(0.35, _restart).start()
+        return web.json_response({"ok": True, "message": "Restarting companion…"})
 
     async def matter_output_handler(request: web.Request) -> web.Response:
         """The sidecar's companion-output switch reads and drives Output on/off."""
@@ -1578,6 +1668,7 @@ def run_ui(
     app.router.add_post("/settings", settings_handler)
     app.router.add_post("/enable", enable_handler)
     app.router.add_post("/reboot", reboot_handler)
+    app.router.add_post("/restart", restart_handler)
     app.router.add_post("/shutdown", shutdown_handler)
     app.router.add_post("/internal/matter/dmx", matter_dmx_handler)
     app.router.add_get("/internal/matter/output", matter_output_handler)
@@ -1592,7 +1683,7 @@ def run_ui(
             raise SystemExit(
                 f"Port {port} is already in use (another bridge UI still running?).\n"
                 f"Stop it with:  fuser -k {port}/tcp\n"
-                f"Or open the existing dashboard and click Stop server,\n"
+                f"Or open the existing dashboard and click Restart companion,\n"
                 f"or pick another port:  python -m magicq_companion --ui --ui-port {port + 1}"
             ) from None
         raise

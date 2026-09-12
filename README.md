@@ -32,7 +32,7 @@ One Art-Net universe (default: universe 0) with these channels:
 | 4      | drop           | 255 for ~16 s after the drop hits                            |
 | 5      | build_progress | Ramps 0 to 255 during a build-up, slams to 255 on the drop   |
 | 6      | beat_pulse     | Toggles 0↔255 on every kick (hard edges for MagicQ BPM)      |
-| 9      | drop_hit       | 255 for ~150 ms only at the instant the drop starts          |
+| 9      | drop_hit       | 255 for the hit length after DROP, then optional fade to 0   |
 | 11     | four_four      | 255 while a 4/4 kick grid is locked, 0 when it isn’t         |
 | 14     | bpm_rate       | 255/128/64/32 = full/½/¼/⅛ BPM chase rate (by energy)       |
 

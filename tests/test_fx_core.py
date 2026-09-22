@@ -228,6 +228,47 @@ class TestPatchCsv(unittest.TestCase):
         self.assertGreaterEqual(patch.summary()["heads"], 2)
         self.assertGreaterEqual(patch.summary()["channels"], 4)
 
+    def test_magicq_view_chans_trailing_spaces_and_blank_rows(self) -> None:
+        # Headers/cells mimic MagicQ View Chans (trailing spaces); blank
+        # Type+Attrib rows are the unused-universe dump and must be skipped.
+        text = (
+            "DMX ,Head type ,Attrib ,Chan name ,Hd no ,Type\n"
+            "1-001 ,Generic Dimmer ,Dimmer ,House ,1 ,HTP \n"
+            "1-010 ,Chauvet ,Red ,FP7LunaBulb ,1 ,LTP \n"
+            "1-002 ,,,,,\n"
+            "1-003 ,SomeHead ,,,,\n"
+            "1-023 ,MAC 700 Profile ,Pan ,,2 ,LTP \n"
+        )
+        patch = parse_patch_csv(text, source_name="view_chans.csv")
+        self.assertEqual(len(patch.channels), 3)
+        self.assertEqual(patch.channels[0].head_name, "House 1")
+        self.assertEqual(patch.channels[0].channel_name, "Dimmer")
+        self.assertEqual(patch.channels[0].merge, FadeMerge.HTP)
+        self.assertEqual(patch.channels[0].address, 1)
+        self.assertEqual(patch.channels[1].head_name, "FP7LunaBulb 1")
+        self.assertEqual(patch.channels[1].channel_name, "Red")
+        self.assertEqual(patch.channels[1].merge, FadeMerge.LTP)
+        self.assertEqual(patch.channels[1].address, 10)
+        # Chan name empty → Head type + Hd no
+        self.assertEqual(patch.channels[2].head_name, "MAC 700 Profile 2")
+        self.assertEqual(patch.channels[2].channel_name, "Pan")
+        self.assertEqual(patch.summary()["heads"], 3)
+
+    def test_magicq_view_chans_example_file(self) -> None:
+        example = (
+            Path(__file__).resolve().parents[1]
+            / "docs"
+            / "examples"
+            / "patch_magicq_view_chans.csv"
+        )
+        text = example.read_text(encoding="utf-8")
+        patch = parse_patch_csv(text)
+        self.assertEqual(len(patch.channels), 5)
+        self.assertIn("FP7LunaBulb 1", patch.summary()["head_names"])
+        self.assertIn("MAC 700 Profile 2", patch.summary()["head_names"])
+        self.assertEqual(patch.channel_merges()[1], FadeMerge.HTP)
+        self.assertEqual(patch.channel_merges()[10], FadeMerge.LTP)
+
 
 if __name__ == "__main__":
     unittest.main()

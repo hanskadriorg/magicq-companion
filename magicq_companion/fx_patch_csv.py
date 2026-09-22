@@ -1,4 +1,4 @@
-"""Parse a flat MagicQ-style fixture patch CSV (heads, addresses, HTP/LTP)."""
+"""Parse fixture patch CSV: simple columns or MagicQ View Chans export."""
 
 from __future__ import annotations
 
@@ -151,6 +151,34 @@ def _parse_merge(raw: str, *, line: int) -> FadeMerge:
     raise PatchCsvError(f"merge must be HTP or LTP, got {raw!r}", line=line)
 
 
+def _is_magicq_view_chans(field_map: dict[str, str]) -> bool:
+    """True for MagicQ View Chans export headers (DMX / Attrib / Chan name / Type)."""
+    if "dmx" not in field_map:
+        return False
+    if "type" not in field_map and "merge" not in field_map:
+        return False
+    return any(
+        key in field_map
+        for key in ("attrib", "chan_name", "hd_no", "head_type")
+    )
+
+
+def _head_name_from_view_chans(row: dict[str, str], *, line: int) -> str:
+    """Build head label: ``Chan name`` + ``Hd no``, else ``Head type`` + ``Hd no``."""
+    chan_name = str(row.get("chan_name") or "").strip()
+    head_type = str(row.get("head_type") or "").strip()
+    hd_no = str(row.get("hd_no") or "").strip()
+    base = chan_name or head_type
+    if not base:
+        raise PatchCsvError(
+            "need Chan name or Head type to build head_name",
+            line=line,
+        )
+    if hd_no:
+        return f"{base} {hd_no}"
+    return base
+
+
 def _row_universe_address(row: dict[str, str], *, line: int) -> tuple[int, int]:
     dmx = (row.get("dmx") or row.get("dmx_address") or "").strip()
     if dmx:
@@ -186,7 +214,13 @@ def parse_patch_csv(
     *,
     source_name: str = "",
 ) -> ImportedPatch:
-    """Parse patch CSV text into an ``ImportedPatch``. Rejects bad rows clearly."""
+    """Parse patch CSV text into an ``ImportedPatch``. Rejects bad rows clearly.
+
+    Accepts the companion simple format (``head_name`` + ``merge`` + address)
+    and MagicQ **View Chans** exports (``DMX``, ``Attrib``, ``Chan name``,
+    ``Hd no``, ``Type``, optional ``Head type``). Headers and cells may carry
+    trailing spaces; unused-universe rows (empty Type and Attrib) are skipped.
+    """
     if text.startswith("\ufeff"):
         text = text[1:]
     reader = csv.DictReader(io.StringIO(text))
@@ -194,20 +228,27 @@ def parse_patch_csv(
         raise PatchCsvError("CSV has no header row")
 
     field_map = {_norm_header(h): h for h in reader.fieldnames if h is not None}
+    view_chans = _is_magicq_view_chans(field_map)
     needed_any = (
         "dmx" in field_map
         or "dmx_address" in field_map
         or ("universe" in field_map and "address" in field_map)
         or ("uni" in field_map and "addr" in field_map)
     )
-    if "head_name" not in field_map and "head" not in field_map:
-        raise PatchCsvError("missing required column head_name")
-    if "merge" not in field_map:
-        raise PatchCsvError("missing required column merge")
-    if not needed_any:
-        raise PatchCsvError(
-            "missing address columns (need dmx, or universe + address)"
-        )
+    if view_chans:
+        if not needed_any:
+            raise PatchCsvError(
+                "missing address columns (need dmx, or universe + address)"
+            )
+    else:
+        if "head_name" not in field_map and "head" not in field_map:
+            raise PatchCsvError("missing required column head_name")
+        if "merge" not in field_map and "type" not in field_map:
+            raise PatchCsvError("missing required column merge")
+        if not needed_any:
+            raise PatchCsvError(
+                "missing address columns (need dmx, or universe + address)"
+            )
 
     channels: list[PatchChannel] = []
     for index, raw in enumerate(reader, start=2):
@@ -220,14 +261,40 @@ def parse_patch_csv(
         values = [v for v in row.values() if v]
         if not values:
             continue
-        head_cell = row.get("head_name") or row.get("head") or ""
-        if str(head_cell).lstrip().startswith("#"):
-            continue
-        head_name = str(head_cell).strip()
-        if not head_name:
-            raise PatchCsvError("head_name is required", line=index)
 
-        merge = _parse_merge(row.get("merge") or "", line=index)
+        if view_chans:
+            type_val = str(row.get("type") or row.get("merge") or "").strip()
+            attrib = str(
+                row.get("attrib")
+                or row.get("channel_name")
+                or row.get("attribute")
+                or ""
+            ).strip()
+            # Unused universe dump: empty Type and empty Attrib
+            if not type_val and not attrib:
+                continue
+            head_name = _head_name_from_view_chans(row, line=index)
+            merge = _parse_merge(type_val, line=index)
+            channel_name = attrib
+        else:
+            head_cell = row.get("head_name") or row.get("head") or ""
+            if str(head_cell).lstrip().startswith("#"):
+                continue
+            head_name = str(head_cell).strip()
+            if not head_name:
+                raise PatchCsvError("head_name is required", line=index)
+
+            merge = _parse_merge(
+                row.get("merge") or row.get("type") or "",
+                line=index,
+            )
+            channel_name = str(
+                row.get("channel_name")
+                or row.get("attrib")
+                or row.get("attribute")
+                or ""
+            ).strip()
+
         universe, address = _row_universe_address(row, line=index)
 
         offset_raw = (row.get("channel_offset") or row.get("offset") or "").strip()
@@ -246,9 +313,6 @@ def parse_patch_csv(
                     line=index,
                 )
 
-        channel_name = str(
-            row.get("channel_name") or row.get("attribute") or ""
-        ).strip()
         channels.append(
             PatchChannel(
                 head_name=head_name,

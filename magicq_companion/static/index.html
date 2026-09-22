@@ -566,10 +566,47 @@
   body[data-mode="pixel"] #layoutGrid,
   body[data-mode="standalone"] #layoutGrid { display: none !important; }
   body:not([data-mode="standalone"]) #fxStage { display: none !important; }
-  .fx-panel { width: 100%; background: var(--panel); border: 1px solid #5a5850; padding: 12px; }
-  .fx-panel h2 { font-size: 14px; margin-bottom: 8px; }
-  .fx-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+  .fx-stage { width: 100%; max-width: 980px; display: flex; flex-direction: column; gap: 8px; }
+  .fx-panel {
+    width: 100%; background: var(--panel); border: 1px solid #5a5850; padding: 10px 12px;
+    box-shadow: inset 0 1px 0 #4a4844;
+  }
+  .fx-panel h2, .fx-panel h3 { font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--title); }
+  .fx-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 6px 0; }
+  .fx-row label { font-size: 11px; display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+  .fx-row input[type="text"], .fx-row input[type="number"], .fx-row select {
+    font-family: inherit; font-size: 11px; padding: 3px 5px;
+    background: #2a2927; color: var(--text); border: 1px solid #5a5850;
+  }
+  .fx-hint { font-size: 11px; color: var(--dim); margin: 4px 0; line-height: 1.35; }
+  .fx-note { font-size: 11px; margin: 6px 0; min-height: 1.2em; }
+  .fx-note.ok { color: #7a9a70; }
+  .fx-note.warn { color: #b09060; }
+  .fx-channel-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;
+  }
+  .fx-channel-card {
+    background: var(--panel-2); border: 1px solid #5a5850; padding: 8px; font-size: 11px;
+  }
+  .fx-channel-card h4 { font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+  .fx-cue-stack { list-style: none; margin: 4px 0; padding: 0; }
+  .fx-cue-stack li {
+    display: flex; justify-content: space-between; gap: 6px; padding: 3px 0;
+    border-bottom: 1px solid #404040;
+  }
+  .fx-timeline {
+    height: 28px; background: #1a1a1a; border: 1px solid #5a5850; position: relative; margin: 8px 0;
+  }
+  .fx-timeline-range {
+    position: absolute; top: 4px; bottom: 4px; background: #4a5a6a; opacity: 0.85;
+  }
+  .fx-palette-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+  .fx-palette-item {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px; background: #2a2927; border: 1px solid #5a5850;
+  }
+  .fx-swatch { width: 20px; height: 20px; border: 1px solid #808080; flex-shrink: 0; }
   .baas-row { font-size: 12px; color: var(--dim); margin: 4px 0; }
+  body[data-mode="menu"] .menu-general { margin-top: 12px; text-align: center; }
   header .menu-btn {
     font-family: inherit; font-size: 11px; font-weight: 700;
     background: var(--face); color: var(--text);
@@ -652,7 +689,7 @@
       </button>
       <button type="button" class="start-card" data-mode="standalone">
         <span class="start-card-title">Standalone FX</span>
-        <span class="start-card-desc">Record console Art-Net/sACN, assign cues to control channels 1–9, palettes, and loop snap.</span>
+        <span class="start-card-desc">Record console Art-Net/sACN, assign cues to control channels 1–10, palettes, and loop snap.</span>
       </button>
       <button type="button" class="start-card" data-mode="matter">
         <span class="start-card-title">Matter to DMX</span>
@@ -663,33 +700,95 @@
         <span class="start-card-desc">Place line and matrix fixtures, then export a MagicQ Import Grid CSV.</span>
       </button>
     </div>
-    <div class="settings" style="margin-top:14px">
-      <div class="seg-label">General — BAAS_26 files</div>
-      <p class="baas-row" id="baasStatus">Checking repo for BAAS_26.shw and BAAS_26.set…</p>
-      <div class="fx-row">
-        <a class="secondary" id="lnkBaasShw" href="/api/baas/BAAS_26.shw">Download BAAS_26.shw</a>
-        <a class="secondary" id="lnkBaasSet" href="/api/baas/BAAS_26.set">Download BAAS_26.set</a>
-        <label class="secondary">Upload .shw<input type="file" id="upBaasShw" accept="*"></label>
-        <label class="secondary">Upload .set<input type="file" id="upBaasSet" accept="*"></label>
-      </div>
-      <p class="baas-row">Show files are served as-is (no .shw parser). Patch tags are manual with a future import seam.</p>
+    <div class="menu-general">
+      <button type="button" class="secondary" id="btnGeneralSettings">General settings…</button>
     </div>
   </div>
 
   <div class="fx-stage" id="fxStage">
     <div class="fx-panel">
-      <h2>Standalone FX</h2>
-      <p class="baas-row" id="fxStatus">Loading…</p>
+      <h2>Record console input</h2>
+      <p class="fx-hint" id="fxStatus">Loading…</p>
+      <p class="fx-hint" id="fxUniverseWarn"></p>
       <div class="fx-row">
-        <button type="button" id="btnFxRecord">Record console input</button>
-        <button type="button" class="secondary" id="btnFxStop">Stop &amp; save</button>
-        <span id="fxLoopHint"></span>
+        <label>Recording name
+          <input type="text" id="fxRecName" placeholder="e.g. Colour chase A" autocomplete="off">
+        </label>
+        <label>Tag
+          <select id="fxRecTag">
+            <option value="intensity">Intensity (HTP)</option>
+            <option value="position">Position (LTP)</option>
+            <option value="colour">Colour (LTP)</option>
+          </select>
+        </label>
+        <label>Fade in (s)
+          <input type="number" id="fxFadeIn" min="0" max="30" step="0.1" value="0">
+        </label>
+        <label>Fade out (s)
+          <input type="number" id="fxFadeOut" min="0" max="30" step="0.1" value="0">
+        </label>
       </div>
       <div class="fx-row">
-        <span>BPM (from audio analysis): <strong id="fxBpm">—</strong></span>
-        <span>Control channels: 1–10 (repatch MagicQ 7–10; see docs/CONTROL_CHANNEL_MAP.md)</span>
+        <button type="button" id="btnFxRecord">Record</button>
+        <button type="button" class="secondary" id="btnFxStop" disabled>Stop &amp; save cue</button>
+        <span class="fx-hint" id="fxLoopHint"></span>
+        <span>BPM: <strong id="fxBpm">128</strong></span>
       </div>
-      <p class="baas-row">Assign cues and tags via <code>/api/fx/library</code> or future UI panels. Cue pick avoids immediate repeat; loop while channel on or step on a timer.</p>
+    </div>
+
+    <div class="fx-panel" id="fxTrimPanel" style="display:none">
+      <h2>Trim &amp; loop snap</h2>
+      <p class="fx-hint" id="fxTrimLabel">Cue: —</p>
+      <div class="fx-timeline" id="fxTimeline"><div class="fx-timeline-range" id="fxTimelineRange"></div></div>
+      <div class="fx-row">
+        <label>Start frame
+          <input type="number" id="fxTrimStart" min="0" step="1" value="0">
+        </label>
+        <label>End frame
+          <input type="number" id="fxTrimEnd" min="1" step="1" value="1">
+        </label>
+        <button type="button" class="secondary" id="btnFxSnap">Snap to loop</button>
+      </div>
+      <p class="fx-note" id="fxSnapNote"></p>
+      <div class="fx-row">
+        <label>Assign to channel
+          <select id="fxAssignChannel">
+            <option value="1">1 groove</option>
+            <option value="2">2 breakdown</option>
+            <option value="3">3 buildup</option>
+            <option value="4">4 drop</option>
+            <option value="5">5 ramp</option>
+            <option value="6">6 beat</option>
+            <option value="7">7 drop_hit</option>
+            <option value="8">8 4/4</option>
+            <option value="9">9 bpm_rate</option>
+            <option value="10">10 drop_momentary</option>
+          </select>
+        </label>
+        <button type="button" id="btnFxAssignCue">Add cue to channel stack</button>
+      </div>
+    </div>
+
+    <div class="fx-panel">
+      <h2>Control channels (1–10)</h2>
+      <p class="fx-hint">Shuffle play with no immediate repeat. Repatch MagicQ for channels 7–10.</p>
+      <div class="fx-channel-grid" id="fxChannelGrid"></div>
+    </div>
+
+    <div class="fx-panel">
+      <h2>Colour palettes</h2>
+      <p class="fx-hint">Crossfade is 3 seconds. Colour FX suppress the palette until release, then the last palette returns.</p>
+      <p class="fx-hint">On startup: <strong id="fxPaletteStartup">—</strong></p>
+      <div class="fx-palette-list" id="fxPaletteList"></div>
+      <div class="fx-row" style="margin-top:8px">
+        <label>Name
+          <input type="text" id="fxPalName" placeholder="Warm wash">
+        </label>
+        <label>R <input type="number" id="fxPalR" min="0" max="255" value="255" style="width:52px"></label>
+        <label>G <input type="number" id="fxPalG" min="0" max="255" value="200" style="width:52px"></label>
+        <label>B <input type="number" id="fxPalB" min="0" max="255" value="120" style="width:52px"></label>
+        <button type="button" class="secondary" id="btnFxPalAdd">Add palette</button>
+      </div>
     </div>
   </div>
 
@@ -1133,6 +1232,33 @@
       <div class="actions">
         <button type="button" class="secondary" id="btnFourFourSettingsCancel">Close</button>
         <button type="button" id="btnFourFourSettingsSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="generalSettingsModal">
+  <div class="modal" role="dialog" aria-labelledby="generalSettingsTitle">
+    <h3 id="generalSettingsTitle">General settings</h3>
+    <p class="hint">BAAS_26 show files are served as-is (no .shw parser). Upload replaces your local copy.</p>
+    <div class="settings">
+      <p class="baas-row" id="baasStatus">Checking bundled files…</p>
+      <div class="fx-row">
+        <a class="secondary" id="lnkBaasShw" href="/api/baas/BAAS_26.shw" download>Download BAAS_26.shw</a>
+        <a class="secondary" id="lnkBaasSet" href="/api/baas/BAAS_26.set" download>Download BAAS_26.set</a>
+      </div>
+      <div class="fx-row">
+        <label class="secondary">Upload BAAS_26.shw
+          <input type="file" id="upBaasShw" accept="*">
+        </label>
+        <label class="secondary">Upload BAAS_26.set
+          <input type="file" id="upBaasSet" accept="*">
+        </label>
+      </div>
+    </div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnGeneralSettingsClose">Close</button>
       </div>
     </div>
   </div>
@@ -2122,7 +2248,7 @@ function setAppMode(mode) {
       body: JSON.stringify({ mode: serverMode }),
     }).catch(() => {});
   }
-  if (mode === "standalone") refreshFxState();
+  if (mode === "standalone") refreshFxAll();
   if (location.hash.replace("#", "") !== mode && mode !== "menu") {
     history.replaceState(null, "", "#" + mode);
   }
@@ -2685,6 +2811,21 @@ document.querySelectorAll("#startMenu .start-card").forEach(btn => {
   btn.onclick = () => setAppMode(btn.dataset.mode);
 });
 
+const FX_CHANNEL_LABELS = {
+  1: "groove", 2: "breakdown", 3: "buildup", 4: "drop", 5: "ramp", 6: "beat",
+  7: "drop_hit", 8: "4/4", 9: "bpm_rate", 10: "drop_momentary",
+};
+let fxLibrary = { recordings: {}, cues: {}, assignments: [], manual_tags: {} };
+let fxPaletteState = { palettes: [], active_id: null, last_active_id: null };
+let fxEditCueId = null;
+let fxEditRecId = null;
+let fxFrameCount = 0;
+let fxPollTimer = null;
+
+function fxId() {
+  return (crypto.randomUUID && crypto.randomUUID()) || `fx${Date.now()}${Math.random().toString(16).slice(2)}`;
+}
+
 async function refreshBaasStatus() {
   try {
     const r = await fetch("/api/baas");
@@ -2692,14 +2833,13 @@ async function refreshBaasStatus() {
     const shw = d["BAAS_26.shw"];
     const set = d["BAAS_26.set"];
     const parts = [];
-    parts.push(`BAAS_26.shw: ${shw?.in_repo ? "in repo" : "not in repo"}${shw?.in_user_store ? ", uploaded copy" : ""}`);
-    parts.push(`BAAS_26.set: ${set?.in_repo ? "in repo" : "not in repo"}${set?.in_user_store ? ", uploaded copy" : ""}`);
+    parts.push(`BAAS_26.shw: ${shw?.in_repo ? "bundled" : "missing"}${shw?.in_user_store ? " · uploaded copy" : ""}`);
+    parts.push(`BAAS_26.set: ${set?.in_repo ? "bundled" : "missing"}${set?.in_user_store ? " · uploaded copy" : ""}`);
     $("baasStatus").textContent = parts.join(" · ");
   } catch (_e) {
     $("baasStatus").textContent = "Could not load BAAS file status.";
   }
 }
-refreshBaasStatus();
 
 async function uploadBaas(name, file) {
   const fd = new FormData();
@@ -2707,8 +2847,181 @@ async function uploadBaas(name, file) {
   await fetch("/api/baas/" + name, { method: "POST", body: fd });
   refreshBaasStatus();
 }
-$("upBaasShw").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.shw", f); };
-$("upBaasSet").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.set", f); };
+
+function ensureFxAssignment(ch) {
+  let a = fxLibrary.assignments.find(x => Number(x.control_channel) === Number(ch));
+  if (!a) {
+    a = {
+      control_channel: Number(ch),
+      cue_ids: [],
+      mode: "loop",
+      step_minutes: 0,
+      step_seconds: 0,
+      trigger: "latched",
+    };
+    fxLibrary.assignments.push(a);
+  }
+  return a;
+}
+
+async function saveFxLibrary() {
+  const r = await fetch("/api/fx/library", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fxLibrary),
+  });
+  if (!r.ok) throw new Error("save library failed");
+}
+
+async function loadFxLibrary() {
+  const r = await fetch("/api/fx/library");
+  if (!r.ok) return;
+  const d = await r.json();
+  fxLibrary = {
+    recordings: d.recordings || {},
+    cues: d.cues || {},
+    assignments: d.assignments || [],
+    manual_tags: d.manual_tags || {},
+  };
+}
+
+async function loadFxPalette() {
+  const r = await fetch("/api/fx/palette");
+  if (!r.ok) return;
+  fxPaletteState = await r.json();
+}
+
+async function saveFxPalette() {
+  await fetch("/api/fx/palette", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fxPaletteState),
+  });
+}
+
+function paletteNameById(id) {
+  const p = (fxPaletteState.palettes || []).find(x => x.id === id);
+  return p ? p.name : id || "—";
+}
+
+function renderFxPalettes() {
+  const list = $("fxPaletteList");
+  list.innerHTML = "";
+  const startup = fxPaletteState.last_active_id || fxPaletteState.active_id;
+  $("fxPaletteStartup").textContent = paletteNameById(startup) + " (3 s fade in)";
+  for (const p of fxPaletteState.palettes || []) {
+    const row = document.createElement("div");
+    row.className = "fx-palette-item";
+    const active = p.id === fxPaletteState.active_id;
+    row.innerHTML = `
+      <span class="fx-swatch" style="background:rgb(${p.red},${p.green},${p.blue})"></span>
+      <span>${p.name}${active ? " · active" : ""}</span>
+      <button type="button" class="secondary" data-pal="${p.id}">Activate</button>
+    `;
+    row.querySelector("button").onclick = async () => {
+      await fetch("/api/fx/palette/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: p.id }),
+      });
+      fxPaletteState.active_id = p.id;
+      renderFxPalettes();
+    };
+    list.appendChild(row);
+  }
+}
+
+function renderFxChannelGrid() {
+  const grid = $("fxChannelGrid");
+  grid.innerHTML = "";
+  for (let ch = 1; ch <= 10; ch++) {
+    const a = ensureFxAssignment(ch);
+    const card = document.createElement("div");
+    card.className = "fx-channel-card";
+    const stack = (a.cue_ids || []).map(cid => {
+      const cue = fxLibrary.cues[cid];
+      const label = cue ? cue.name : cid.slice(0, 8);
+      return `<li><span>${label}</span><button type="button" class="secondary" data-ch="${ch}" data-cid="${cid}">×</button></li>`;
+    }).join("");
+    card.innerHTML = `
+      <h4>Ch ${ch} · ${FX_CHANNEL_LABELS[ch] || ""}</h4>
+      <ul class="fx-cue-stack">${stack || "<li class='fx-hint'>No cues</li>"}</ul>
+      <label>Playback
+        <select data-ch="${ch}" class="fxChMode">
+          <option value="loop" ${a.mode === "loop" ? "selected" : ""}>Loop while on</option>
+          <option value="step" ${a.mode === "step" ? "selected" : ""}>Step after timer</option>
+        </select>
+      </label>
+      <label>Step mm:ss
+        <span style="display:flex;gap:4px">
+          <input type="number" min="0" max="59" class="fxChMin" data-ch="${ch}" value="${a.step_minutes || 0}" style="width:42px">
+          <input type="number" min="0" max="59" class="fxChSec" data-ch="${ch}" value="${a.step_seconds || 0}" style="width:42px">
+        </span>
+      </label>
+      <label>Trigger
+        <select data-ch="${ch}" class="fxChTrigger">
+          <option value="latched" ${a.trigger !== "momentary" ? "selected" : ""}>Latched</option>
+          <option value="momentary" ${a.trigger === "momentary" ? "selected" : ""}>Momentary</option>
+        </select>
+      </label>
+    `;
+    card.querySelectorAll("button[data-cid]").forEach(btn => {
+      btn.onclick = async () => {
+        const channel = Number(btn.dataset.ch);
+        const cid = btn.dataset.cid;
+        const assign = ensureFxAssignment(channel);
+        assign.cue_ids = assign.cue_ids.filter(x => x !== cid);
+        await saveFxLibrary();
+        renderFxChannelGrid();
+      };
+    });
+    card.querySelector(".fxChMode").onchange = async ev => {
+      ensureFxAssignment(ch).mode = ev.target.value;
+      await saveFxLibrary();
+    };
+    card.querySelector(".fxChTrigger").onchange = async ev => {
+      ensureFxAssignment(ch).trigger = ev.target.value;
+      await saveFxLibrary();
+    };
+    const saveStep = async () => {
+      const assign = ensureFxAssignment(ch);
+      assign.step_minutes = Number(card.querySelector(".fxChMin").value) || 0;
+      assign.step_seconds = Number(card.querySelector(".fxChSec").value) || 0;
+      await saveFxLibrary();
+    };
+    card.querySelector(".fxChMin").onchange = saveStep;
+    card.querySelector(".fxChSec").onchange = saveStep;
+    grid.appendChild(card);
+  }
+}
+
+function updateFxTimeline() {
+  const n = Math.max(1, fxFrameCount);
+  const start = Math.max(0, Math.min(Number($("fxTrimStart").value) || 0, n - 1));
+  const end = Math.max(start + 1, Math.min(Number($("fxTrimEnd").value) || n, n));
+  $("fxTrimStart").value = String(start);
+  $("fxTrimEnd").value = String(end);
+  const range = $("fxTimelineRange");
+  range.style.left = `${(start / n) * 100}%`;
+  range.style.width = `${((end - start) / n) * 100}%`;
+  if (fxEditCueId && fxLibrary.cues[fxEditCueId]) {
+    fxLibrary.cues[fxEditCueId].trim_start = start;
+    fxLibrary.cues[fxEditCueId].trim_end = end;
+  }
+}
+
+function showFxTrimPanel(cue, rec) {
+  fxEditCueId = cue.id;
+  fxEditRecId = rec.id;
+  fxFrameCount = (rec.frames_b64 || []).length;
+  $("fxTrimPanel").style.display = "";
+  $("fxTrimLabel").textContent = `Cue “${cue.name}” · ${fxFrameCount} frames · tag ${(rec.tags && rec.tags["0"]) || "intensity"}`;
+  $("fxTrimStart").value = String(cue.trim_start || 0);
+  $("fxTrimEnd").value = String(cue.trim_end || fxFrameCount);
+  $("fxSnapNote").textContent = "";
+  $("fxSnapNote").className = "fx-note";
+  updateFxTimeline();
+}
 
 async function refreshFxState() {
   try {
@@ -2718,24 +3031,135 @@ async function refreshFxState() {
       $("fxStatus").textContent = "FX engine starting…";
       return;
     }
-    $("fxStatus").textContent = d.recording
+    $("fxUniverseWarn").textContent = d.universe_warning || "";
+    const rec = d.recording;
+    $("btnFxRecord").disabled = rec;
+    $("btnFxStop").disabled = !rec;
+    $("fxStatus").textContent = rec
       ? `Recording… ${d.record_frames} frames`
-      : `Idle · ${d.record_frames || 0} frames in last take`;
+      : "Ready to record (listen universe ≠ output universe).";
     $("fxLoopHint").textContent = d.loop_detected_at != null
       ? `Loop detected near frame ${d.loop_detected_at} — stop when ready`
       : "";
-    $("fxBpm").textContent = d.bpm ? Number(d.bpm).toFixed(1) : "—";
+    $("fxBpm").textContent = d.bpm ? Number(d.bpm).toFixed(1) : "128";
   } catch (_e) {
     $("fxStatus").textContent = "FX state unavailable.";
   }
 }
+
+async function refreshFxAll() {
+  await loadFxLibrary();
+  await loadFxPalette();
+  renderFxChannelGrid();
+  renderFxPalettes();
+  await refreshFxState();
+  if (!fxPollTimer) {
+    fxPollTimer = setInterval(() => {
+      if (document.body.dataset.mode === "standalone") refreshFxState();
+    }, 500);
+  }
+}
+
+$("btnGeneralSettings").onclick = () => {
+  refreshBaasStatus();
+  setModalOpen("generalSettingsModal", true);
+};
+$("btnGeneralSettingsClose").onclick = () => setModalOpen("generalSettingsModal", false);
+$("generalSettingsModal").addEventListener("click", ev => {
+  if (ev.target === $("generalSettingsModal")) setModalOpen("generalSettingsModal", false);
+});
+$("upBaasShw").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.shw", f); };
+$("upBaasSet").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.set", f); };
+
 $("btnFxRecord").onclick = async () => {
-  await fetch("/api/fx/record/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  const name = ($("fxRecName").value || "").trim() || "Recording";
+  await fetch("/api/fx/record/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  $("fxSnapNote").textContent = "";
   refreshFxState();
 };
+
 $("btnFxStop").onclick = async () => {
-  await fetch("/api/fx/record/stop", { method: "POST" });
+  const r = await fetch("/api/fx/record/stop", { method: "POST" });
+  const d = await r.json();
+  if (!r.ok) return;
+  const rec = d.recording;
+  const tag = $("fxRecTag").value || "intensity";
+  rec.tags = { "0": tag };
+  const cueId = fxId().replace(/-/g, "");
+  const n = (rec.frames_b64 || []).length;
+  const cue = {
+    id: cueId,
+    name: rec.name || ($("fxRecName").value || "Cue"),
+    recording_id: rec.id,
+    fade_in_s: Number($("fxFadeIn").value) || 0,
+    fade_out_s: Number($("fxFadeOut").value) || 0,
+    trim_start: 0,
+    trim_end: n,
+    loop: true,
+  };
+  await loadFxLibrary();
+  fxLibrary.recordings[rec.id] = rec;
+  fxLibrary.cues[cueId] = cue;
+  await saveFxLibrary();
+  showFxTrimPanel(cue, rec);
+  renderFxChannelGrid();
   refreshFxState();
+};
+
+$("fxTrimStart").onchange = async () => { updateFxTimeline(); await saveFxLibrary(); };
+$("fxTrimEnd").onchange = async () => { updateFxTimeline(); await saveFxLibrary(); };
+
+$("btnFxSnap").onclick = async () => {
+  if (!fxEditCueId || !fxEditRecId) return;
+  const r = await fetch("/api/fx/snap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recording_id: fxEditRecId, cue_id: fxEditCueId }),
+  });
+  const d = await r.json();
+  const note = $("fxSnapNote");
+  note.textContent = d.message || (d.snapped ? "Loop handles snapped." : "No change.");
+  note.className = d.snapped ? "fx-note ok" : "fx-note warn";
+  if (d.snapped) {
+    $("fxTrimStart").value = String(d.trim_start);
+    $("fxTrimEnd").value = String(d.trim_end);
+    updateFxTimeline();
+  }
+  await loadFxLibrary();
+  if (fxEditCueId && fxLibrary.cues[fxEditCueId]) {
+    $("fxTrimStart").value = String(fxLibrary.cues[fxEditCueId].trim_start);
+    $("fxTrimEnd").value = String(fxLibrary.cues[fxEditCueId].trim_end);
+    updateFxTimeline();
+  }
+};
+
+$("btnFxAssignCue").onclick = async () => {
+  if (!fxEditCueId) return;
+  const ch = Number($("fxAssignChannel").value);
+  const a = ensureFxAssignment(ch);
+  if (!a.cue_ids.includes(fxEditCueId)) a.cue_ids.push(fxEditCueId);
+  await saveFxLibrary();
+  renderFxChannelGrid();
+};
+
+$("btnFxPalAdd").onclick = async () => {
+  const name = ($("fxPalName").value || "").trim() || "Palette";
+  const id = fxId().replace(/-/g, "");
+  fxPaletteState.palettes = fxPaletteState.palettes || [];
+  fxPaletteState.palettes.push({
+    id,
+    name,
+    red: Number($("fxPalR").value) || 0,
+    green: Number($("fxPalG").value) || 0,
+    blue: Number($("fxPalB").value) || 0,
+  });
+  await saveFxPalette();
+  await loadFxPalette();
+  renderFxPalettes();
 };
 {
   const hashMode = location.hash.replace("#", "");

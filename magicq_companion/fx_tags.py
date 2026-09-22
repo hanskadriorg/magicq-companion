@@ -45,4 +45,7 @@ def merge_value(
 
 
 def tag_for_channel(channel: int, tags: dict[int, FxTagKind]) -> FxTagKind:
+    """Channel 0 in tags is the recording-wide default tag kind."""
+    if 0 in tags:
+        return tags[0]
     return tags.get(channel, FxTagKind.INTENSITY)

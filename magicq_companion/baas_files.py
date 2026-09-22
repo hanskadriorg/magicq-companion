@@ -10,7 +10,7 @@ BAAS_SET_NAME = "BAAS_26.set"
 
 
 def bundled_baas_dir(bundle_root: Path) -> Path:
-    return bundle_root / "data"
+    return bundle_root / "base_show"
 
 
 def repo_baas_paths(bundle_root: Path) -> dict[str, Path]:

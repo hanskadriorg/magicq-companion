@@ -20,7 +20,8 @@ from .fx_palette import (
     restore_active_palette,
     save_palette_state,
 )
-from .fx_patch import ManualPatchSource
+from .fx_patch import CsvPatchSource, ManualPatchSource, PatchSource
+from .fx_patch_csv import ImportedPatch, load_imported_patch, save_imported_patch
 from .fx_playback import apply_cue_frame, cue_fade_level
 from .fx_store import (
     FxChannelAssignment,
@@ -72,9 +73,11 @@ class FxEngine:
         channel_map: dict[str, int],
         dry_run: bool = False,
         record_fps: float = 40.0,
+        patch_path=None,
     ) -> None:
         self.library_path = library_path
         self.palette_path = palette_path
+        self.patch_path = patch_path
         self.output_cfg = output_cfg
         self.input_universe = int(input_universe)
         self.output_universe = int(output_universe)
@@ -85,7 +88,10 @@ class FxEngine:
         self.library = load_fx_library(library_path)
         self.palette_state = load_palette_state(palette_path)
         restore_active_palette(self.palette_state)
-        self.patch = ManualPatchSource(tags_as_kinds(self.library.manual_tags))
+        self.imported_patch = (
+            load_imported_patch(patch_path) if patch_path is not None else ImportedPatch()
+        )
+        self.patch = self._build_patch_source()
 
         self.state = FxEngineState()
         if self.input_universe == self.output_universe:
@@ -109,6 +115,25 @@ class FxEngine:
         self._palette_suppressed = False
         self._on_state: Callable[[dict], None] | None = None
 
+    def _build_patch_source(self) -> PatchSource:
+        if self.imported_patch.channels:
+            return CsvPatchSource(self.imported_patch)
+        return ManualPatchSource(tags_as_kinds(self.library.manual_tags))
+
+    def set_imported_patch(self, patch: ImportedPatch) -> None:
+        self.imported_patch = patch
+        self.patch = self._build_patch_source()
+        if self.patch_path is not None:
+            save_imported_patch(self.patch_path, patch)
+
+    def clear_imported_patch(self) -> None:
+        from pathlib import Path
+
+        self.imported_patch = ImportedPatch()
+        self.patch = ManualPatchSource(tags_as_kinds(self.library.manual_tags))
+        if self.patch_path is not None:
+            Path(self.patch_path).unlink(missing_ok=True)
+
     def _palette_rgb_target(self) -> tuple[int, int, int]:
         for p in self.palette_state.palettes:
             if p.id == self.palette_state.active_id:
@@ -123,6 +148,8 @@ class FxEngine:
     def save_all(self) -> None:
         save_fx_library(self.library_path, self.library)
         save_palette_state(self.palette_path, self.palette_state)
+        if self.patch_path is not None and self.imported_patch.channels:
+            save_imported_patch(self.patch_path, self.imported_patch)
 
     def start(self) -> None:
         if self._thread is not None:
@@ -251,6 +278,7 @@ class FxEngine:
             out = bytearray(base)
             controls = self._control_values()
             tags = self.patch.channel_tags()
+            merges = self.patch.channel_merges()
 
         colour_fx_active = False
 
@@ -331,6 +359,7 @@ class FxEngine:
                 fade_t=fade_t,
                 cue_level=level,
                 tags=tags,
+                merges=merges,
             ):
                 colour_fx_active = True
 
@@ -362,4 +391,5 @@ class FxEngine:
             "universe_warning": self.state.universe_warning,
             "input_universe": self.input_universe,
             "output_universe": self.output_universe,
+            "patch": self.patch.summary() if self.imported_patch.channels else None,
         }

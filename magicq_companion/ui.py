@@ -45,7 +45,7 @@ from .output import (
     describe_output,
     list_ipv4_interfaces,
 )
-from .paths import default_layout_path, fx_library_path, fx_palette_path, static_dir
+from .paths import default_layout_path, fx_library_path, fx_palette_path, fx_patch_path, static_dir
 from .pipeline import Bridge
 
 _DROP_SENSING_FIELDS = {
@@ -284,6 +284,7 @@ class _Manager:
         self.fx_engine = FxEngine(
             library_path=fx_library_path(self.config_path),
             palette_path=fx_palette_path(self.config_path),
+            patch_path=fx_patch_path(self.config_path),
             output_cfg=audio_output_cfg(self.cfg),
             input_universe=self.cfg.fx.input_universe,
             output_universe=self.cfg.artnet.universe,

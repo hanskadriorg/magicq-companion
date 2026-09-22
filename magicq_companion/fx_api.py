@@ -17,8 +17,8 @@ from .baas_files import (
 )
 from .control_channels import DEFAULT_RENUMBER
 from .fx_loop import snap_trim_to_loop
-from .fx_patch import ManualPatchSource
-from .fx_store import FxLibrary, tags_as_kinds
+from .fx_patch_csv import PatchCsvError, parse_patch_csv
+from .fx_store import FxLibrary
 from .paths import bundle_dir
 
 
@@ -70,9 +70,56 @@ def attach_fx_routes(app: web.Application, manager) -> None:
             return web.json_response({"error": "invalid JSON"}, status=400)
         lib = FxLibrary.from_dict(body)
         eng.library = lib
-        eng.patch = ManualPatchSource(tags_as_kinds(lib.manual_tags))
+        # Keep CSV patch as the merge source when present; otherwise refresh manual tags.
+        eng.patch = eng._build_patch_source()
         eng.save_all()
         return web.json_response({"ok": True})
+
+    async def fx_patch_handler(_request: web.Request) -> web.Response:
+        eng = manager.ensure_fx_engine()
+        if eng.imported_patch.channels:
+            return web.json_response(
+                {"ok": True, "loaded": True, **eng.imported_patch.summary()}
+            )
+        return web.json_response(
+            {"ok": True, "loaded": False, "channels": 0, "heads": 0}
+        )
+
+    async def fx_patch_import(request: web.Request) -> web.Response:
+        eng = manager.ensure_fx_engine()
+        reader = await request.multipart()
+        field = await reader.next()
+        if field is None:
+            return web.json_response({"error": "file required"}, status=400)
+        chunks: list[bytes] = []
+        while True:
+            chunk = await field.read_chunk()
+            if not chunk:
+                break
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return web.json_response(
+                {"error": "CSV must be UTF-8 text"}, status=400
+            )
+        filename = ""
+        if getattr(field, "filename", None):
+            filename = Path(str(field.filename)).name
+        try:
+            patch = parse_patch_csv(text, source_name=filename)
+        except PatchCsvError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        eng.set_imported_patch(patch)
+        return web.json_response({"ok": True, "loaded": True, **patch.summary()})
+
+    async def fx_patch_clear(_request: web.Request) -> web.Response:
+        eng = manager.ensure_fx_engine()
+        eng.clear_imported_patch()
+        return web.json_response(
+            {"ok": True, "loaded": False, "channels": 0, "heads": 0}
+        )
 
     async def fx_snap_handler(request: web.Request) -> web.Response:
         try:
@@ -92,7 +139,11 @@ def attach_fx_routes(app: web.Application, manager) -> None:
             orig_start,
             orig_end,
         )
-        message = "Loop handles snapped." if snapped else "No matching loop seam; handles unchanged."
+        message = (
+            "Loop handles snapped."
+            if snapped
+            else "No matching loop seam; handles unchanged."
+        )
         if snapped:
             cue.trim_start = start
             cue.trim_end = end
@@ -116,7 +167,7 @@ def attach_fx_routes(app: web.Application, manager) -> None:
             body = await request.json()
         except json.JSONDecodeError:
             return web.json_response({"error": "invalid JSON"}, status=400)
-        from .fx_palette import ColourPalette, PaletteState
+        from .fx_palette import PaletteState
 
         eng.palette_state = PaletteState.from_dict(body)
         eng.save_all()
@@ -196,6 +247,9 @@ def attach_fx_routes(app: web.Application, manager) -> None:
     app.router.add_post("/api/fx/record/stop", fx_record_stop)
     app.router.add_get("/api/fx/library", fx_library_handler)
     app.router.add_post("/api/fx/library", fx_library_save)
+    app.router.add_get("/api/fx/patch", fx_patch_handler)
+    app.router.add_post("/api/fx/patch", fx_patch_import)
+    app.router.add_delete("/api/fx/patch", fx_patch_clear)
     app.router.add_post("/api/fx/snap", fx_snap_handler)
     app.router.add_get("/api/fx/palette", fx_palette_handler)
     app.router.add_post("/api/fx/palette", fx_palette_handler)

@@ -26,3 +26,4 @@ Legacy autopilot output forced channels **7, 8, and 10** to 0; **12** and **13**
 - BPM holds the last good value from audio analysis; until then **128**.
 - Fades release cleanly (no pan/tilt slammed to 0); hard zero only on explicit blackout.
 - Position tags fade **16-bit coarse/fine pairs** together.
+- Fixture patch: import a flat CSV of head names, DMX addresses, and per-channel **HTP/LTP** (see [`PATCH_CSV.md`](PATCH_CSV.md)). Persisted as `fx_patch.json`.

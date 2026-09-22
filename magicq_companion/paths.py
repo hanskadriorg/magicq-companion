@@ -69,6 +69,11 @@ def fx_palette_path(config_path: str | Path | None = None) -> Path:
     return data_dir(config_path) / "fx_palettes.json"
 
 
+def fx_patch_path(config_path: str | Path | None = None) -> Path:
+    """Imported fixture patch CSV (persisted as JSON) next to the FX library."""
+    return data_dir(config_path) / "fx_patch.json"
+
+
 def default_layout_path(config_path: str | Path | None = None) -> Path:
     """Writable UI layout JSON, kept next to config.toml when possible."""
     if config_path is not None:

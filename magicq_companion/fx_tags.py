@@ -29,9 +29,10 @@ def merge_value(
     candidate: int,
     fade_t: float,
     cue_level: float,
+    merge: FadeMerge | None = None,
 ) -> int:
     """Blend `candidate` into `current` at fade position fade_t in [0,1]."""
-    merge = TAG_DEFAULT_MERGE[kind]
+    rule = merge if merge is not None else TAG_DEFAULT_MERGE[kind]
     scaled = int(round(candidate * cue_level))
     if fade_t <= 0.0:
         return current
@@ -39,7 +40,7 @@ def merge_value(
         target = scaled
     else:
         target = int(round(current + (scaled - current) * fade_t))
-    if merge is FadeMerge.HTP:
+    if rule is FadeMerge.HTP:
         return max(current, target)
     return target
 

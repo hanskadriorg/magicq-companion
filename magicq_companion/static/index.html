@@ -770,6 +770,18 @@
     </div>
 
     <div class="fx-panel">
+      <h2>Fixture patch (CSV)</h2>
+      <p class="fx-hint">One row per channel: head name, address (<code>1-001</code> or universe+address), optional channel name, and HTP or LTP. See docs/PATCH_CSV.md.</p>
+      <div class="fx-row">
+        <label class="secondary">Import patch CSV
+          <input type="file" id="upFxPatch" accept=".csv,text/csv,text/plain">
+        </label>
+        <button type="button" class="secondary" id="btnFxPatchClear">Clear patch</button>
+      </div>
+      <p class="fx-note" id="fxPatchSummary">No patch loaded.</p>
+    </div>
+
+    <div class="fx-panel">
       <h2>Control channels (1–10)</h2>
       <p class="fx-hint">Shuffle play with no immediate repeat. Repatch MagicQ for channels 7–10.</p>
       <div class="fx-channel-grid" id="fxChannelGrid"></div>
@@ -3047,9 +3059,52 @@ async function refreshFxState() {
   }
 }
 
+function renderFxPatchSummary(d) {
+  const el = $("fxPatchSummary");
+  if (!el) return;
+  if (!d || !d.loaded || !d.channels) {
+    el.textContent = "No patch loaded.";
+    el.className = "fx-note";
+    return;
+  }
+  const names = (d.head_names || []).slice(0, 6).join(", ");
+  const more = (d.head_names || []).length > 6 ? "…" : "";
+  const src = d.source_name ? ` · ${d.source_name}` : "";
+  el.textContent =
+    `${d.heads} head${d.heads === 1 ? "" : "s"}, ${d.channels} channel${d.channels === 1 ? "" : "s"}`
+    + ` (${d.htp || 0} HTP / ${d.ltp || 0} LTP)${src}`
+    + (names ? ` — ${names}${more}` : "");
+  el.className = "fx-note ok";
+}
+
+async function loadFxPatchSummary() {
+  try {
+    const r = await fetch("/api/fx/patch");
+    if (!r.ok) return;
+    renderFxPatchSummary(await r.json());
+  } catch (_e) {
+    renderFxPatchSummary(null);
+  }
+}
+
+async function uploadFxPatch(file) {
+  const fd = new FormData();
+  fd.append("file", file, file.name || "patch.csv");
+  const r = await fetch("/api/fx/patch", { method: "POST", body: fd });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const el = $("fxPatchSummary");
+    el.textContent = d.error || "Import failed.";
+    el.className = "fx-note warn";
+    return;
+  }
+  renderFxPatchSummary(d);
+}
+
 async function refreshFxAll() {
   await loadFxLibrary();
   await loadFxPalette();
+  await loadFxPatchSummary();
   renderFxChannelGrid();
   renderFxPalettes();
   await refreshFxState();
@@ -3070,6 +3125,15 @@ $("generalSettingsModal").addEventListener("click", ev => {
 });
 $("upBaasShw").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.shw", f); };
 $("upBaasSet").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.set", f); };
+$("upFxPatch").onchange = e => {
+  const f = e.target.files[0];
+  if (f) uploadFxPatch(f);
+  e.target.value = "";
+};
+$("btnFxPatchClear").onclick = async () => {
+  await fetch("/api/fx/patch", { method: "DELETE" });
+  renderFxPatchSummary(null);
+};
 
 $("btnFxRecord").onclick = async () => {
   const name = ($("fxRecName").value || "").trim() || "Recording";

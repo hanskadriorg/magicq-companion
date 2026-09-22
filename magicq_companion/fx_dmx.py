@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .fx_tags import FxTagKind
+from .fx_tags import FadeMerge, FxTagKind, TAG_DEFAULT_MERGE
 
 # Channels that were legacy-retired and must not be driven to "off" as zero pan/tilt.
 _LEGACY_RETIRED = frozenset({7, 8, 12, 13})
@@ -47,11 +47,13 @@ def release_target(
     candidate: int,
     blended: int,
     cue_level: float,
+    merge: FadeMerge | None = None,
 ) -> int:
     """On fade-out, do not slam position/colour to 0 — hold until blend completes."""
     if cue_level > 0.0:
         return blended
-    if kind is FxTagKind.POSITION:
+    rule = merge if merge is not None else TAG_DEFAULT_MERGE[kind]
+    if kind is FxTagKind.POSITION or rule is FadeMerge.LTP:
         return current
     if kind is FxTagKind.COLOUR and candidate == 0 and current != 0:
         return current

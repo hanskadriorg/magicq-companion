@@ -1,0 +1,7 @@
+DMX ,Head type ,Attrib ,Chan name ,Hd no ,Type
+1-001 ,Generic Dimmer ,Dimmer ,House ,1 ,HTP 
+1-010 ,Chauvet COLORado ,Red ,FP7LunaBulb ,1 ,LTP 
+1-011 ,Chauvet COLORado ,Green ,FP7LunaBulb ,1 ,LTP 
+1-023 ,MAC 700 Profile ,Pan ,,2 ,LTP 
+1-002 ,,,,,
+2-050 ,LED Wash ,Dimmer ,WashA ,3 ,HTP 

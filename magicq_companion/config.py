@@ -81,11 +81,13 @@ class ChannelMap:
     build_progress: int = 5
     beat_pulse: int = 6
     # One-shot pulse at the moment DROP begins (for cue/macro triggers).
-    drop_hit: int = 9
+    drop_hit: int = 7
     # 255 while a 4/4 kick grid is locked in the music (else 0).
-    four_four: int = 11
+    four_four: int = 8
     # Chase rate vs BPM: 255=full, 128=half, 64=quarter, 32=eighth (energy-picked).
-    bpm_rate: int = 14
+    bpm_rate: int = 9
+    # Momentary drop trigger (standalone: follows button; autopilot: held dark).
+    drop_momentary: int = 10
 
 
 @dataclass
@@ -335,6 +337,24 @@ def _default_reboot_days() -> list[str]:
     return ["mon", "tue", "wed", "thu", "fri"]
 
 
+APP_MODES = ("sound", "standalone_fx")
+
+
+@dataclass
+class AppConfig:
+    """Which program runs on the Pi: automatic sound or standalone FX."""
+
+    mode: str = "sound"
+
+
+@dataclass
+class FxConfig:
+    """Standalone FX: listen on this universe; control channels use [channels]."""
+
+    input_universe: int = 0
+    record_fps: float = 40.0
+
+
 @dataclass
 class ServerConfig:
     """Host defaults from the dashboard Server settings modal."""
@@ -360,6 +380,8 @@ class BpmRateConfig:
 
 @dataclass
 class Config:
+    app: AppConfig = field(default_factory=AppConfig)
+    fx: FxConfig = field(default_factory=FxConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     artnet: ArtNetConfig = field(default_factory=ArtNetConfig)
     matter: MatterConfig = field(default_factory=MatterConfig)
@@ -373,6 +395,8 @@ class Config:
 
 
 _SECTIONS = {
+    "app": AppConfig,
+    "fx": FxConfig,
     "network": NetworkConfig,
     "artnet": ArtNetConfig,
     "matter": MatterConfig,
@@ -421,7 +445,9 @@ def load_config(path: str | Path | None) -> Config:
             else:
                 raise ValueError(f"Unknown config key: [{section_name}] {key}")
     _migrate_legacy_intensity(cfg, data.get("detection", {}))
+    _migrate_control_channel_addresses(cfg)
     _sync_shared_network(cfg)
+    cfg.app.mode = _coerce_app_mode(cfg.app.mode)
     cfg.audio.input_channel = coerce_input_channel(cfg.audio.input_channel)
     cfg.audio.noise_floor_db = clamp_noise_floor(cfg.audio.noise_floor_db)
     cfg.ui.visualizer = bool(cfg.ui.visualizer)
@@ -497,6 +523,25 @@ def coerce_style(value: str | None) -> str:
     }
     name = aliases.get(name, name)
     return name if name in STYLE_NAMES else "auto"
+
+
+def coerce_app_mode(value: object) -> str:
+    name = str(value or "sound").strip().lower()
+    return name if name in APP_MODES else "sound"
+
+
+def _coerce_app_mode(value: object) -> str:
+    return coerce_app_mode(value)
+
+
+def _migrate_control_channel_addresses(cfg: Config) -> None:
+    from .control_channels import CONTROL_CHANNEL_NAMES, migrate_channel_map_values
+
+    ch = cfg.channels
+    values = {name: int(getattr(ch, name)) for name in CONTROL_CHANNEL_NAMES}
+    migrated = migrate_channel_map_values(values)
+    for name, addr in migrated.items():
+        setattr(ch, name, addr)
 
 
 def _migrate_legacy_intensity(cfg: Config, section: dict) -> None:

@@ -30,9 +30,11 @@ from .config import (
     coerce_reboot_days,
     coerce_style,
     coerce_visualizer_mode,
+    coerce_app_mode,
     matter_output_cfg,
     try_reboot_time,
 )
+from .control_channels import DEFAULT_RENUMBER, CONTROL_CHANNEL_NAMES
 from .schedule import apply_host_schedule
 from .matter_runtime import MatterOutput, MatterSidecar, describe_matter
 from .output import (
@@ -43,7 +45,7 @@ from .output import (
     describe_output,
     list_ipv4_interfaces,
 )
-from .paths import default_layout_path, static_dir
+from .paths import default_layout_path, fx_library_path, fx_palette_path, fx_patch_path, static_dir
 from .pipeline import Bridge
 
 _DROP_SENSING_FIELDS = {
@@ -115,6 +117,7 @@ class _Manager:
         self._log_started = 0.0
         self.matter_out: MatterOutput | None = None
         self.sidecar = MatterSidecar()
+        self.fx_engine = None
 
     # ------------------------------------------------------------------
 
@@ -146,6 +149,8 @@ class _Manager:
                 self.state["spectrum"] = []
             self.state["meta"] = self._meta()
         self.worker.start()
+        if coerce_app_mode(self.cfg.app.mode) == "standalone_fx":
+            self._start_fx_engine()
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -163,6 +168,7 @@ class _Manager:
 
     def stop_all(self) -> None:
         self.stop()
+        self._stop_fx_engine()
         if self.matter_out is not None:
             self.matter_out.close()
             self.matter_out = None
@@ -182,6 +188,8 @@ class _Manager:
         if self.matter_out is not None:
             self.matter_out.enabled = bool(self.cfg.matter.enabled) and live
         self._record_section(b)
+        if self.fx_engine is not None:
+            self.fx_engine.set_bpm(f.bpm)
         with self.state_lock:
             self.state.update(
                 t=round(b.t, 2),
@@ -264,6 +272,55 @@ class _Manager:
             self.section_log.clear()
             self.section_log.extend(kept)
 
+    def _channel_map_dict(self) -> dict[str, int]:
+        ch = self.cfg.channels
+        return {name: int(getattr(ch, name)) for name in CONTROL_CHANNEL_NAMES}
+
+    def _start_fx_engine(self) -> None:
+        if self.fx_engine is not None:
+            return
+        from .fx_engine import FxEngine
+
+        self.fx_engine = FxEngine(
+            library_path=fx_library_path(self.config_path),
+            palette_path=fx_palette_path(self.config_path),
+            patch_path=fx_patch_path(self.config_path),
+            output_cfg=audio_output_cfg(self.cfg),
+            input_universe=self.cfg.fx.input_universe,
+            output_universe=self.cfg.artnet.universe,
+            channel_map=self._channel_map_dict(),
+            dry_run=self.dry_run,
+            record_fps=self.cfg.fx.record_fps,
+        )
+        self.fx_engine.start()
+        if self.bridge is not None:
+            self.bridge.enabled = False
+
+    def _stop_fx_engine(self) -> None:
+        if self.fx_engine is None:
+            return
+        self.fx_engine.stop()
+        self.fx_engine = None
+
+    def ensure_fx_engine(self):
+        if self.fx_engine is None:
+            self._start_fx_engine()
+        return self.fx_engine
+
+    def set_app_mode(self, mode: str) -> None:
+        mode = coerce_app_mode(mode)
+        self.cfg.app.mode = mode
+        if mode == "standalone_fx":
+            self._start_fx_engine()
+        else:
+            self._stop_fx_engine()
+            if self.bridge is not None:
+                self.bridge.enabled = self.enabled
+        with self.state_lock:
+            meta = dict(self.state.get("meta") or {})
+            meta["app_mode"] = mode
+            self.state["meta"] = meta
+
     def sections(self) -> list[dict]:
         now = time.time()
         cutoff = now - _SECTION_LOG_SECONDS
@@ -342,6 +399,10 @@ class _Manager:
             "visualizer": self.visualizer,
             "dry_run": self.dry_run,
             "simulate": self.simulate,
+            "app_mode": coerce_app_mode(self.cfg.app.mode),
+            "control_channels": self._channel_map_dict(),
+            "control_channel_map_doc": DEFAULT_RENUMBER.document_lines(),
+            "fx_input_universe": self.cfg.fx.input_universe,
         }
 
     def _load_layout(self) -> dict:
@@ -1832,6 +1893,10 @@ def run_ui(
         if not dest.is_file():
             raise web.HTTPNotFound()
         return web.FileResponse(dest)
+
+    from .fx_api import attach_fx_routes
+
+    attach_fx_routes(app, manager)
 
     app.router.add_get("/pixel-mapper", pixel_redirect)
     app.router.add_get("/pixel-mapper/", pixel_files)

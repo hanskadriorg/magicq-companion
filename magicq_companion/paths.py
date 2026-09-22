@@ -53,6 +53,22 @@ def default_config_path() -> Path:
     return install_dir() / "config.toml"
 
 
+def data_dir(config_path: str | Path | None = None) -> Path:
+    if config_path is not None:
+        return Path(config_path).resolve().parent
+    if is_frozen():
+        return default_config_path().parent
+    return install_dir()
+
+
+def fx_library_path(config_path: str | Path | None = None) -> Path:
+    return data_dir(config_path) / "fx_library.json"
+
+
+def fx_palette_path(config_path: str | Path | None = None) -> Path:
+    return data_dir(config_path) / "fx_palettes.json"
+
+
 def default_layout_path(config_path: str | Path | None = None) -> Path:
     """Writable UI layout JSON, kept next to config.toml when possible."""
     if config_path is not None:

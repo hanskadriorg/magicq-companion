@@ -1,4 +1,13 @@
 # MagicQ Companion configuration
+
+[app]
+# sound = audio autopilot (default). standalone_fx = console FX recorder/player.
+mode = "sound"
+
+[fx]
+# Universe to listen to when recording console Art-Net/sACN (not our output).
+input_universe = 0
+record_fps = 40
 #
 # All detection values have sensible defaults for techno/house.
 # Start by only changing [artnet] ip and, if needed, [audio] device.
@@ -68,11 +77,12 @@ build_progress = 5
 beat_pulse = 6
 # 255 at DROP start for drop_hit_seconds, then fades over drop_hit_fade_seconds.
 # Channel 4 stays high for the whole drop look; this one is the impact flash.
-drop_hit = 9
+drop_hit = 7
 # 255 while a 4/4 kick grid is locked, 0 when it isn't.
-four_four = 11
+four_four = 8
 # Chase speed vs BPM from energy: 255=full, 128=½, 64=¼, 32=⅛ (no fades).
-bpm_rate = 14
+bpm_rate = 9
+drop_momentary = 10
 
 # Channel 14 (bpm_rate): energy → BPM divider within an allowed band.
 [bpm_rate]

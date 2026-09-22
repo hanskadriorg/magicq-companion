@@ -66,7 +66,4 @@ def build_frame(
     else:
         set_ch(channels.drop_hit, 0)
     set_ch(channels.bpm_rate, features.bpm_rate)
-    # Retired channels (energy / kick / melody) — keep them dark so MagicQ
-    # does not hold the last value after a config upgrade.
-    for retired in (7, 8, 10):
-        dmx[retired - 1] = 0
+    set_ch(channels.drop_momentary, 0)

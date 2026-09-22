@@ -16,6 +16,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(PKG / "static"), "static"),
+        (str(PKG / "data"), "data"),
         (str(ROOT / "config.toml"), "."),
     ],
     hiddenimports=[

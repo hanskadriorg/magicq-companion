@@ -563,7 +563,13 @@
   body:not([data-mode="menu"]) #startMenu,
   body:not([data-mode="pixel"]) #pixelStage,
   body[data-mode="menu"] #layoutGrid,
-  body[data-mode="pixel"] #layoutGrid { display: none !important; }
+  body[data-mode="pixel"] #layoutGrid,
+  body[data-mode="standalone"] #layoutGrid { display: none !important; }
+  body:not([data-mode="standalone"]) #fxStage { display: none !important; }
+  .fx-panel { width: 100%; background: var(--panel); border: 1px solid #5a5850; padding: 12px; }
+  .fx-panel h2 { font-size: 14px; margin-bottom: 8px; }
+  .fx-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+  .baas-row { font-size: 12px; color: var(--dim); margin: 4px 0; }
   header .menu-btn {
     font-family: inherit; font-size: 11px; font-weight: 700;
     background: var(--face); color: var(--text);
@@ -644,6 +650,10 @@
         <span class="start-card-title">Audio based autopilot</span>
         <span class="start-card-desc">Live audio analysis to Art-Net / sACN. Build, drop, breakdown, and the section log.</span>
       </button>
+      <button type="button" class="start-card" data-mode="standalone">
+        <span class="start-card-title">Standalone FX</span>
+        <span class="start-card-desc">Record console Art-Net/sACN, assign cues to control channels 1–9, palettes, and loop snap.</span>
+      </button>
       <button type="button" class="start-card" data-mode="matter">
         <span class="start-card-title">Matter to DMX</span>
         <span class="start-card-desc">Pair Matter lights and send them to MagicQ on their own universe.</span>
@@ -652,6 +662,34 @@
         <span class="start-card-title">Pixel mapper</span>
         <span class="start-card-desc">Place line and matrix fixtures, then export a MagicQ Import Grid CSV.</span>
       </button>
+    </div>
+    <div class="settings" style="margin-top:14px">
+      <div class="seg-label">General — BAAS_26 files</div>
+      <p class="baas-row" id="baasStatus">Checking repo for BAAS_26.shw and BAAS_26.set…</p>
+      <div class="fx-row">
+        <a class="secondary" id="lnkBaasShw" href="/api/baas/BAAS_26.shw">Download BAAS_26.shw</a>
+        <a class="secondary" id="lnkBaasSet" href="/api/baas/BAAS_26.set">Download BAAS_26.set</a>
+        <label class="secondary">Upload .shw<input type="file" id="upBaasShw" accept="*"></label>
+        <label class="secondary">Upload .set<input type="file" id="upBaasSet" accept="*"></label>
+      </div>
+      <p class="baas-row">Show files are served as-is (no .shw parser). Patch tags are manual with a future import seam.</p>
+    </div>
+  </div>
+
+  <div class="fx-stage" id="fxStage">
+    <div class="fx-panel">
+      <h2>Standalone FX</h2>
+      <p class="baas-row" id="fxStatus">Loading…</p>
+      <div class="fx-row">
+        <button type="button" id="btnFxRecord">Record console input</button>
+        <button type="button" class="secondary" id="btnFxStop">Stop &amp; save</button>
+        <span id="fxLoopHint"></span>
+      </div>
+      <div class="fx-row">
+        <span>BPM (from audio analysis): <strong id="fxBpm">—</strong></span>
+        <span>Control channels: 1–10 (repatch MagicQ 7–10; see docs/CONTROL_CHANNEL_MAP.md)</span>
+      </div>
+      <p class="baas-row">Assign cues and tags via <code>/api/fx/library</code> or future UI panels. Cue pick avoids immediate repeat; loop while channel on or step on a timer.</p>
     </div>
   </div>
 
@@ -1160,9 +1198,10 @@ const CH_CHIPS = [
   {ch: 4, name: "drop"},
   {ch: 5, name: "ramp"},
   {ch: 6, name: "beat"},
-  {ch: 9, name: "drop_hit"},
-  {ch: 11, name: "4/4"},
-  {ch: 14, name: "bpm_rate"},
+  {ch: 7, name: "drop_hit"},
+  {ch: 8, name: "4/4"},
+  {ch: 9, name: "bpm_rate"},
+  {ch: 10, name: "drop_mom"},
 ];
 const BPM_RATE_LABELS = {32: "1/8", 64: "1/4", 128: "1/2", 255: "1/1"};
 const BPM_STEPS = ["eighth", "quarter", "half", "full"];
@@ -1170,6 +1209,7 @@ const BPM_STEP_LABELS = ["1/8", "1/4", "1/2", "1/1"];
 const BOX_IDS = ["settings", "hero", "dmx", "log", "matter", "gamepad"];
 const MODE_BOXES = {
   audio: ["settings", "hero", "dmx", "log", "gamepad"],
+  standalone: [],
   matter: ["matter"],
   pixel: [],
   menu: [],
@@ -1177,6 +1217,7 @@ const MODE_BOXES = {
 const MODE_TITLES = {
   menu: "MAGICQ COMPANION",
   audio: "AUDIO AUTOPILOT",
+  standalone: "STANDALONE FX",
   matter: "MATTER TO DMX",
   pixel: "PIXEL MAPPER",
 };
@@ -2073,6 +2114,15 @@ function setAppMode(mode) {
   }
   if (mode === "audio" || mode === "matter") applyLayout(layout);
   else applyWrapWidth(layout);
+  if (mode === "standalone" || mode === "audio") {
+    const serverMode = mode === "standalone" ? "standalone_fx" : "sound";
+    fetch("/api/app/mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: serverMode }),
+    }).catch(() => {});
+  }
+  if (mode === "standalone") refreshFxState();
   if (location.hash.replace("#", "") !== mode && mode !== "menu") {
     history.replaceState(null, "", "#" + mode);
   }
@@ -2634,6 +2684,59 @@ $("btnMenu").onclick = () => setAppMode("menu");
 document.querySelectorAll("#startMenu .start-card").forEach(btn => {
   btn.onclick = () => setAppMode(btn.dataset.mode);
 });
+
+async function refreshBaasStatus() {
+  try {
+    const r = await fetch("/api/baas");
+    const d = await r.json();
+    const shw = d["BAAS_26.shw"];
+    const set = d["BAAS_26.set"];
+    const parts = [];
+    parts.push(`BAAS_26.shw: ${shw?.in_repo ? "in repo" : "not in repo"}${shw?.in_user_store ? ", uploaded copy" : ""}`);
+    parts.push(`BAAS_26.set: ${set?.in_repo ? "in repo" : "not in repo"}${set?.in_user_store ? ", uploaded copy" : ""}`);
+    $("baasStatus").textContent = parts.join(" · ");
+  } catch (_e) {
+    $("baasStatus").textContent = "Could not load BAAS file status.";
+  }
+}
+refreshBaasStatus();
+
+async function uploadBaas(name, file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  await fetch("/api/baas/" + name, { method: "POST", body: fd });
+  refreshBaasStatus();
+}
+$("upBaasShw").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.shw", f); };
+$("upBaasSet").onchange = e => { const f = e.target.files[0]; if (f) uploadBaas("BAAS_26.set", f); };
+
+async function refreshFxState() {
+  try {
+    const r = await fetch("/api/fx/state");
+    const d = await r.json();
+    if (!d.active) {
+      $("fxStatus").textContent = "FX engine starting…";
+      return;
+    }
+    $("fxStatus").textContent = d.recording
+      ? `Recording… ${d.record_frames} frames`
+      : `Idle · ${d.record_frames || 0} frames in last take`;
+    $("fxLoopHint").textContent = d.loop_detected_at != null
+      ? `Loop detected near frame ${d.loop_detected_at} — stop when ready`
+      : "";
+    $("fxBpm").textContent = d.bpm ? Number(d.bpm).toFixed(1) : "—";
+  } catch (_e) {
+    $("fxStatus").textContent = "FX state unavailable.";
+  }
+}
+$("btnFxRecord").onclick = async () => {
+  await fetch("/api/fx/record/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  refreshFxState();
+};
+$("btnFxStop").onclick = async () => {
+  await fetch("/api/fx/record/stop", { method: "POST" });
+  refreshFxState();
+};
 {
   const hashMode = location.hash.replace("#", "");
   setAppMode(MODE_BOXES[hashMode] ? hashMode : "menu");

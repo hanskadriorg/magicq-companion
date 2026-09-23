@@ -54,11 +54,13 @@ class DmxReceiver:
         port: int = 6454,
         interface: str = "",
         protocol: str = "artnet",
+        bind_host: str = "",
         on_frame: Callable[[int, bytes], None] | None = None,
     ) -> None:
         self.port = int(port)
         self.interface = interface or ""
         self.protocol = (protocol or "artnet").lower()
+        self.bind_host = (bind_host or "").strip()
         self._on_frame = on_frame
         self._sock: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -74,9 +76,16 @@ class DmxReceiver:
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except (AttributeError, OSError):
             pass
-        if self.interface:
-            bind_to_interface(self._sock, self.interface, multicast=self.protocol == "sacn")
-        self._sock.bind(("", self.port))
+        # Prefer an explicit listen IP (standalone FX input). Otherwise bind the
+        # named NIC when set; fall back to all interfaces.
+        if self.bind_host:
+            self._sock.bind((self.bind_host, self.port))
+        else:
+            if self.interface:
+                bind_to_interface(
+                    self._sock, self.interface, multicast=self.protocol == "sacn"
+                )
+            self._sock.bind(("", self.port))
         self._thread = threading.Thread(target=self._run, name="dmx-receive", daemon=True)
         self._thread.start()
 

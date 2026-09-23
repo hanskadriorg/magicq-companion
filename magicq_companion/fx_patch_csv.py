@@ -14,6 +14,50 @@ _DMX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# MagicQ / CSV attribute names → RGB or CMY component.
+_COLOUR_RGB = {
+    "red": "r",
+    "r": "r",
+    "green": "g",
+    "g": "g",
+    "blue": "b",
+    "b": "b",
+}
+_COLOUR_CMY = {
+    "cyan": "c",
+    "c": "c",
+    "magenta": "m",
+    "m": "m",
+    "yellow": "y",
+    "y": "y",
+}
+
+
+def colour_component(channel_name: str) -> str | None:
+    """Return 'r'|'g'|'b'|'c'|'m'|'y' for a colour attribute, else None."""
+    raw = str(channel_name or "").strip().lower()
+    if not raw:
+        return None
+    # Strip common suffixes: "Red fine", "Blue 1"
+    token = re.split(r"[\s_/.-]+", raw, maxsplit=1)[0]
+    if token in _COLOUR_RGB:
+        return _COLOUR_RGB[token]
+    if token in _COLOUR_CMY:
+        return _COLOUR_CMY[token]
+    if "red" in raw and "fine" not in raw:
+        return "r"
+    if "green" in raw and "fine" not in raw:
+        return "g"
+    if "blue" in raw and "fine" not in raw:
+        return "b"
+    if raw.startswith("cyan") or " cyan" in f" {raw}":
+        return "c"
+    if raw.startswith("magenta") or " magenta" in f" {raw}":
+        return "m"
+    if raw.startswith("yellow") and "fine" not in raw:
+        return "y"
+    return None
+
 
 class PatchCsvError(ValueError):
     """Raised when a CSV row or file cannot be imported."""
@@ -94,18 +138,37 @@ class ImportedPatch:
         return out
 
     def channel_tags(self) -> dict[int, FxTagKind]:
-        """Map merge flags onto tag kinds used by the existing fade path.
+        """Map merge / attribute names onto tag kinds used by the fade path.
 
-        HTP → intensity. LTP is not forced to position (avoids false 16-bit pairs);
-        playback uses ``channel_merges()`` for the actual HTP/LTP rule.
+        HTP → intensity. Colour attribute names (Red/Green/Blue/…) → colour.
+        Other LTP rows are left untagged so playback uses ``channel_merges()``
+        without inventing false 16-bit position pairs.
         """
         out: dict[int, FxTagKind] = {}
         for ch in self.channels:
             if not (1 <= ch.address <= 512):
                 continue
-            if ch.merge is FadeMerge.HTP:
+            if colour_component(ch.channel_name) is not None:
+                out[ch.address] = FxTagKind.COLOUR
+            elif ch.merge is FadeMerge.HTP:
                 out[ch.address] = FxTagKind.INTENSITY
         return out
+
+    def entries(self) -> list[dict]:
+        """Readable per-channel rows for the dashboard patch list."""
+        rows: list[dict] = []
+        for ch in self.channels:
+            rows.append(
+                {
+                    "head_name": ch.head_name,
+                    "channel_name": ch.channel_name,
+                    "universe": ch.universe,
+                    "address": ch.address,
+                    "dmx": f"{ch.universe}-{ch.address:03d}",
+                    "merge": ch.merge.value.upper(),
+                }
+            )
+        return rows
 
     def summary(self) -> dict:
         heads = sorted({c.head_name for c in self.channels if c.head_name})
@@ -120,6 +183,7 @@ class ImportedPatch:
             "ltp": ltp,
             "universes": universes,
             "source_name": self.source_name,
+            "entries": self.entries(),
         }
 
 

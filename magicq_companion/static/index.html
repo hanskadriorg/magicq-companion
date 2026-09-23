@@ -605,6 +605,35 @@
     display: flex; align-items: center; gap: 8px; padding: 4px 6px; background: #2a2927; border: 1px solid #5a5850;
   }
   .fx-swatch { width: 20px; height: 20px; border: 1px solid #808080; flex-shrink: 0; }
+  .fx-signal {
+    display: inline-flex; align-items: center; gap: 8px; font-size: 11px;
+    padding: 4px 8px; background: #2a2927; border: 1px solid #5a5850;
+  }
+  .fx-signal-light {
+    width: 12px; height: 12px; border-radius: 50%; background: #3a3a38;
+    border: 1px solid #606058; flex-shrink: 0;
+  }
+  .fx-signal-light.live {
+    background: #6a9a5a;
+    box-shadow: 0 0 0 0 rgba(106, 154, 90, 0.55);
+    animation: fxSignalPulse 1.1s ease-out infinite;
+  }
+  @keyframes fxSignalPulse {
+    0% { box-shadow: 0 0 0 0 rgba(106, 154, 90, 0.55); }
+    70% { box-shadow: 0 0 0 8px rgba(106, 154, 90, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(106, 154, 90, 0); }
+  }
+  .fx-patch-list {
+    margin-top: 8px; max-height: 220px; overflow: auto;
+    border: 1px solid #5a5850; background: #1e1d1b;
+  }
+  .fx-patch-list table {
+    width: 100%; border-collapse: collapse; font-size: 11px;
+  }
+  .fx-patch-list th, .fx-patch-list td {
+    text-align: left; padding: 4px 6px; border-bottom: 1px solid #3a3936;
+  }
+  .fx-patch-list th { color: var(--dim); font-weight: 600; position: sticky; top: 0; background: #252422; }
   .baas-row { font-size: 12px; color: var(--dim); margin: 4px 0; }
   body[data-mode="menu"] .menu-general { margin-top: 12px; text-align: center; }
   header .menu-btn {
@@ -707,9 +736,28 @@
 
   <div class="fx-stage" id="fxStage">
     <div class="fx-panel">
+      <h2>Console input (listen)</h2>
+      <p class="fx-hint">Where MagicQ sends Art-Net/sACN for recording. Separate from audio/Matter <em>output</em> settings.</p>
+      <div class="fx-row">
+        <label>Input universe
+          <input type="number" id="fxInputUniverse" min="0" max="63999" step="1" value="0">
+        </label>
+        <label>Listen IP
+          <input type="text" id="fxInputIp" placeholder="blank = all interfaces" autocomplete="off" spellcheck="false">
+        </label>
+        <button type="button" class="secondary" id="btnFxInputSave">Save input</button>
+        <span class="fx-signal" id="fxSignal" title="Live packets on the listen universe">
+          <span class="fx-signal-light" id="fxSignalLight" aria-hidden="true"></span>
+          <span id="fxSignalText">No signal</span>
+        </span>
+      </div>
+      <p class="fx-note" id="fxInputNote"></p>
+      <p class="fx-hint" id="fxUniverseWarn"></p>
+    </div>
+
+    <div class="fx-panel">
       <h2>Record console input</h2>
       <p class="fx-hint" id="fxStatus">Loading…</p>
-      <p class="fx-hint" id="fxUniverseWarn"></p>
       <div class="fx-row">
         <label>Recording name
           <input type="text" id="fxRecName" placeholder="e.g. Colour chase A" autocomplete="off">
@@ -779,6 +827,14 @@
         <button type="button" class="secondary" id="btnFxPatchClear">Clear patch</button>
       </div>
       <p class="fx-note" id="fxPatchSummary">No patch loaded.</p>
+      <div class="fx-patch-list" id="fxPatchList" hidden>
+        <table>
+          <thead>
+            <tr><th>Head</th><th>Channel</th><th>Address</th><th>Merge</th></tr>
+          </thead>
+          <tbody id="fxPatchListBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="fx-panel">
@@ -789,18 +845,16 @@
 
     <div class="fx-panel">
       <h2>Colour palettes</h2>
-      <p class="fx-hint">Crossfade is 3 seconds. Colour FX suppress the palette until release, then the last palette returns.</p>
+      <p class="fx-hint">Record a static look from the console on the listen universe, then activate it. Crossfade is 3 seconds. Colour FX suppress the palette until release; last used restores on startup.</p>
       <p class="fx-hint">On startup: <strong id="fxPaletteStartup">—</strong></p>
-      <div class="fx-palette-list" id="fxPaletteList"></div>
-      <div class="fx-row" style="margin-top:8px">
-        <label>Name
-          <input type="text" id="fxPalName" placeholder="Warm wash">
+      <div class="fx-row">
+        <label>Palette name
+          <input type="text" id="fxPalName" placeholder="Warm wash" autocomplete="off">
         </label>
-        <label>R <input type="number" id="fxPalR" min="0" max="255" value="255" style="width:52px"></label>
-        <label>G <input type="number" id="fxPalG" min="0" max="255" value="200" style="width:52px"></label>
-        <label>B <input type="number" id="fxPalB" min="0" max="255" value="120" style="width:52px"></label>
-        <button type="button" class="secondary" id="btnFxPalAdd">Add palette</button>
+        <button type="button" id="btnFxPalRecord">Record look</button>
       </div>
+      <p class="fx-note" id="fxPalNote"></p>
+      <div class="fx-palette-list" id="fxPaletteList"></div>
     </div>
   </div>
 
@@ -3041,7 +3095,14 @@ async function refreshFxState() {
     const d = await r.json();
     if (!d.active) {
       $("fxStatus").textContent = "FX engine starting…";
+      updateFxSignal(null);
       return;
+    }
+    if ($("fxInputUniverse") && document.activeElement !== $("fxInputUniverse")) {
+      $("fxInputUniverse").value = String(d.input_universe ?? 0);
+    }
+    if ($("fxInputIp") && document.activeElement !== $("fxInputIp")) {
+      $("fxInputIp").value = d.input_ip || "";
     }
     $("fxUniverseWarn").textContent = d.universe_warning || "";
     const rec = d.recording;
@@ -3049,22 +3110,45 @@ async function refreshFxState() {
     $("btnFxStop").disabled = !rec;
     $("fxStatus").textContent = rec
       ? `Recording… ${d.record_frames} frames`
-      : "Ready to record (listen universe ≠ output universe).";
+      : `Ready · listen u${d.input_universe}${d.input_ip ? " @ " + d.input_ip : ""} (output u${d.output_universe}).`;
     $("fxLoopHint").textContent = d.loop_detected_at != null
       ? `Loop detected near frame ${d.loop_detected_at} — stop when ready`
       : "";
     $("fxBpm").textContent = d.bpm ? Number(d.bpm).toFixed(1) : "128";
+    updateFxSignal(d.input_signal || null);
   } catch (_e) {
     $("fxStatus").textContent = "FX state unavailable.";
+    updateFxSignal(null);
   }
+}
+
+function updateFxSignal(sig) {
+  const light = $("fxSignalLight");
+  const text = $("fxSignalText");
+  if (!light || !text) return;
+  if (!sig || !sig.live) {
+    light.classList.remove("live");
+    const age = sig && sig.last_packet_age_s != null
+      ? ` · last ${Number(sig.last_packet_age_s).toFixed(1)}s ago`
+      : "";
+    text.textContent = `No signal${age}`;
+    return;
+  }
+  light.classList.add("live");
+  const fps = sig.fps != null ? Number(sig.fps).toFixed(0) : "—";
+  text.textContent = `Signal · ${fps} fps`;
 }
 
 function renderFxPatchSummary(d) {
   const el = $("fxPatchSummary");
+  const list = $("fxPatchList");
+  const body = $("fxPatchListBody");
   if (!el) return;
   if (!d || !d.loaded || !d.channels) {
     el.textContent = "No patch loaded.";
     el.className = "fx-note";
+    if (list) list.hidden = true;
+    if (body) body.innerHTML = "";
     return;
   }
   const names = (d.head_names || []).slice(0, 6).join(", ");
@@ -3075,6 +3159,26 @@ function renderFxPatchSummary(d) {
     + ` (${d.htp || 0} HTP / ${d.ltp || 0} LTP)${src}`
     + (names ? ` — ${names}${more}` : "");
   el.className = "fx-note ok";
+  if (list && body) {
+    const entries = d.entries || [];
+    body.innerHTML = entries.map(row => `
+      <tr>
+        <td>${escapeFxHtml(row.head_name || "—")}</td>
+        <td>${escapeFxHtml(row.channel_name || "—")}</td>
+        <td>${escapeFxHtml(row.dmx || `${row.universe}-${String(row.address).padStart(3, "0")}`)}</td>
+        <td>${escapeFxHtml(row.merge || "—")}</td>
+      </tr>
+    `).join("");
+    list.hidden = entries.length === 0;
+  }
+}
+
+function escapeFxHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 async function loadFxPatchSummary() {
@@ -3133,6 +3237,35 @@ $("upFxPatch").onchange = e => {
 $("btnFxPatchClear").onclick = async () => {
   await fetch("/api/fx/patch", { method: "DELETE" });
   renderFxPatchSummary(null);
+};
+
+$("btnFxInputSave").onclick = async () => {
+  const note = $("fxInputNote");
+  const body = {
+    input_universe: Number($("fxInputUniverse").value) || 0,
+    input_ip: ($("fxInputIp").value || "").trim(),
+  };
+  try {
+    const r = await fetch("/api/fx/input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      note.className = "fx-note warn";
+      note.textContent = d.error || "Could not save input settings.";
+      return;
+    }
+    note.className = "fx-note ok";
+    note.textContent = d.message || "Input settings saved.";
+    $("fxInputUniverse").value = String(d.input_universe ?? body.input_universe);
+    $("fxInputIp").value = d.input_ip || "";
+    refreshFxState();
+  } catch (e) {
+    note.className = "fx-note warn";
+    note.textContent = "Could not save input settings: " + e;
+  }
 };
 
 $("btnFxRecord").onclick = async () => {
@@ -3210,20 +3343,34 @@ $("btnFxAssignCue").onclick = async () => {
   renderFxChannelGrid();
 };
 
-$("btnFxPalAdd").onclick = async () => {
+$("btnFxPalRecord").onclick = async () => {
   const name = ($("fxPalName").value || "").trim() || "Palette";
-  const id = fxId().replace(/-/g, "");
-  fxPaletteState.palettes = fxPaletteState.palettes || [];
-  fxPaletteState.palettes.push({
-    id,
-    name,
-    red: Number($("fxPalR").value) || 0,
-    green: Number($("fxPalG").value) || 0,
-    blue: Number($("fxPalB").value) || 0,
-  });
-  await saveFxPalette();
-  await loadFxPalette();
-  renderFxPalettes();
+  const note = $("fxPalNote");
+  try {
+    const r = await fetch("/api/fx/palette/record", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      note.className = "fx-note warn";
+      note.textContent = d.error || "Record failed.";
+      return;
+    }
+    await loadFxPalette();
+    renderFxPalettes();
+    const rgb = d.palette
+      ? ` rgb(${d.palette.red},${d.palette.green},${d.palette.blue})`
+      : "";
+    note.className = d.signal_live ? "fx-note ok" : "fx-note warn";
+    note.textContent = d.signal_live
+      ? `Saved “${name}”${rgb} from live console input.`
+      : `Saved “${name}”${rgb} — no recent packets on listen universe; check input settings.`;
+  } catch (e) {
+    note.className = "fx-note warn";
+    note.textContent = "Record failed: " + e;
+  }
 };
 {
   const hashMode = location.hash.replace("#", "");

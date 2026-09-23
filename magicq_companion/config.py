@@ -351,7 +351,11 @@ class AppConfig:
 class FxConfig:
     """Standalone FX: listen on this universe; control channels use [channels]."""
 
+    # Universe MagicQ transmits / Companion records (separate from [artnet] output).
     input_universe: int = 0
+    # Local IPv4 to bind the Art-Net/sACN listener ("" = all interfaces).
+    # Point the console at this address (or the NIC that owns it).
+    input_ip: str = ""
     record_fps: float = 40.0
 
 

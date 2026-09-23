@@ -287,6 +287,7 @@ class _Manager:
             patch_path=fx_patch_path(self.config_path),
             output_cfg=audio_output_cfg(self.cfg),
             input_universe=self.cfg.fx.input_universe,
+            input_ip=self.cfg.fx.input_ip,
             output_universe=self.cfg.artnet.universe,
             channel_map=self._channel_map_dict(),
             dry_run=self.dry_run,
@@ -403,6 +404,7 @@ class _Manager:
             "control_channels": self._channel_map_dict(),
             "control_channel_map_doc": DEFAULT_RENUMBER.document_lines(),
             "fx_input_universe": self.cfg.fx.input_universe,
+            "fx_input_ip": self.cfg.fx.input_ip,
         }
 
     def _load_layout(self) -> dict:
@@ -618,6 +620,8 @@ class _Manager:
         reboot_enabled: bool | None = None,
         reboot_time: str | None = None,
         reboot_days: list[str] | None = None,
+        fx_input_universe: int | None = None,
+        fx_input_ip: str | None = None,
     ) -> str:
         with self.ctl_lock:
             cfg = self.cfg
@@ -822,6 +826,20 @@ class _Manager:
                     cfg.ui.visualizer_mode = mode
                     input_changed = True
 
+            fx_input_changed = False
+            fx_uni = None
+            fx_ip = None
+            if fx_input_universe is not None:
+                fx_uni = int(fx_input_universe)
+                if fx_uni != cfg.fx.input_universe:
+                    cfg.fx.input_universe = fx_uni
+                    fx_input_changed = True
+            if fx_input_ip is not None:
+                fx_ip = str(fx_input_ip or "").strip()
+                if fx_ip != (cfg.fx.input_ip or ""):
+                    cfg.fx.input_ip = fx_ip
+                    fx_input_changed = True
+
             if (
                 not device_changed
                 and not channel_changed
@@ -838,6 +856,7 @@ class _Manager:
                 and not input_changed
                 and not silence_changed
                 and not server_changed
+                and not fx_input_changed
             ):
                 return "No changes to apply."
 
@@ -868,6 +887,16 @@ class _Manager:
             if bpm_changed and self.bridge is not None:
                 self.bridge.extractor.bpm_rate_cfg = cfg.bpm_rate
 
+            if self.fx_engine is not None:
+                if fx_input_changed:
+                    self.fx_engine.configure_input(
+                        input_universe=cfg.fx.input_universe,
+                        input_ip=cfg.fx.input_ip,
+                    )
+                if audio_changed:
+                    self.fx_engine.output_universe = cfg.artnet.universe
+                    self.fx_engine._refresh_universe_warning()
+
             with self.state_lock:
                 self.state["meta"] = self._meta()
             self._persist()
@@ -881,6 +910,13 @@ class _Manager:
                 parts.append("audio " + describe_output(audio_output_cfg(cfg)))
             if matter_changed:
                 parts.append(describe_matter(cfg))
+            if fx_input_changed:
+                listen = f"FX listen u{cfg.fx.input_universe}"
+                if cfg.fx.input_ip:
+                    listen += f" @ {cfg.fx.input_ip}"
+                else:
+                    listen += " (all interfaces)"
+                parts.append(listen)
             if bpm_changed:
                 parts.append(
                     f"BPM divider {cfg.bpm_rate.min}…{cfg.bpm_rate.max}, "
@@ -1053,6 +1089,10 @@ class _Manager:
         text = self._upsert_in_section(text, "server", "reboot_enabled", bool(srv.reboot_enabled))
         text = self._upsert_in_section(text, "server", "reboot_time", srv.reboot_time)
         text = self._upsert_in_section(text, "server", "reboot_days", list(srv.reboot_days))
+        text = self._ensure_section(text, "fx")
+        text = self._upsert_in_section(text, "fx", "input_universe", int(self.cfg.fx.input_universe))
+        text = self._upsert_in_section(text, "fx", "input_ip", self.cfg.fx.input_ip or "")
+        text = self._upsert_in_section(text, "fx", "record_fps", float(self.cfg.fx.record_fps))
         path.write_text(text)
 
     def _ensure_section(self, text: str, section: str) -> str:
@@ -1234,6 +1274,8 @@ def run_ui(
         reboot_enabled = body.get("reboot_enabled")
         reboot_time = body.get("reboot_time")
         reboot_days = body.get("reboot_days")
+        fx_input_universe = body.get("fx_input_universe")
+        fx_input_ip = body.get("fx_input_ip")
         if drop_sensing is not None and not isinstance(drop_sensing, dict):
             return web.json_response({"error": "drop_sensing must be an object"}, status=400)
         if protocol is not None:
@@ -1571,6 +1613,29 @@ def run_ui(
                 return web.json_response(
                     {"error": "drop hit fade must be 0–5 seconds"}, status=400
                 )
+        if fx_input_universe is not None:
+            try:
+                fx_input_universe = int(fx_input_universe)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "fx_input_universe must be a number"}, status=400
+                )
+            if not 0 <= fx_input_universe <= 63999:
+                return web.json_response(
+                    {"error": "fx_input_universe out of range"}, status=400
+                )
+        if fx_input_ip is not None:
+            fx_input_ip = str(fx_input_ip).strip()
+            if fx_input_ip:
+                parts = fx_input_ip.split(".")
+                ok = len(parts) == 4 and all(
+                    p.isdigit() and 0 <= int(p) <= 255 for p in parts
+                )
+                if not ok:
+                    return web.json_response(
+                        {"error": "fx_input_ip must be an IPv4 address or empty"},
+                        status=400,
+                    )
         loop = asyncio.get_running_loop()
         try:
             message = await loop.run_in_executor(
@@ -1614,6 +1679,8 @@ def run_ui(
                     reboot_enabled,
                     reboot_time,
                     reboot_days,
+                    fx_input_universe,
+                    fx_input_ip,
                 ),
             )
         except Exception as exc:  # e.g. unknown device name

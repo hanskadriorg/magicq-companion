@@ -7,6 +7,8 @@ mode = "sound"
 [fx]
 # Universe to listen to when recording console Art-Net/sACN (not our output).
 input_universe = 0
+# Local IPv4 bind for the listener ("" = all interfaces). Keep separate from [network] ip.
+input_ip = ""
 record_fps = 40
 #
 # All detection values have sensible defaults for techno/house.

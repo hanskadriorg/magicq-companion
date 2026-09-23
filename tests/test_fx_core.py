@@ -13,10 +13,16 @@ from magicq_companion.control_channels import (
 )
 from magicq_companion.fx_cue_select import CueShuffleBag
 from magicq_companion.fx_loop import snap_trim_to_loop
-from magicq_companion.fx_palette import ColourPalette, PaletteState, restore_active_palette
+from magicq_companion.fx_palette import (
+    ColourPalette,
+    PaletteState,
+    restore_active_palette,
+    sample_rgb_from_frame,
+)
 from magicq_companion.fx_patch import CsvPatchSource
 from magicq_companion.fx_patch_csv import (
     PatchCsvError,
+    colour_component,
     load_imported_patch,
     parse_dmx_token,
     parse_patch_csv,
@@ -106,6 +112,46 @@ class TestPaletteRestore(unittest.TestCase):
         self.assertEqual(state.active_id, "b")
 
 
+class TestPaletteSample(unittest.TestCase):
+    def test_colour_component_names(self) -> None:
+        self.assertEqual(colour_component("Red"), "r")
+        self.assertEqual(colour_component("Green"), "g")
+        self.assertEqual(colour_component("Blue"), "b")
+        self.assertEqual(colour_component("Cyan"), "c")
+        self.assertIsNone(colour_component("Dimmer"))
+        self.assertIsNone(colour_component("Pan"))
+
+    def test_sample_rgb_from_patch_names(self) -> None:
+        text = (
+            "head_name,dmx,channel_name,merge\n"
+            "Bulb,1-010,Red,ltp\n"
+            "Bulb,1-011,Green,ltp\n"
+            "Bulb,1-012,Blue,ltp\n"
+        )
+        patch = parse_patch_csv(text)
+        frame = bytearray(512)
+        frame[9] = 200
+        frame[10] = 100
+        frame[11] = 50
+        rgb = sample_rgb_from_frame(bytes(frame), patch=patch)
+        self.assertEqual(rgb, (200, 100, 50))
+
+    def test_sample_cmy_converts(self) -> None:
+        text = (
+            "head_name,dmx,channel_name,merge\n"
+            "Mac,1-004,Cyan,ltp\n"
+            "Mac,1-005,Magenta,ltp\n"
+            "Mac,1-006,Yellow,ltp\n"
+        )
+        patch = parse_patch_csv(text)
+        frame = bytearray(512)
+        frame[3] = 0
+        frame[4] = 55
+        frame[5] = 255
+        rgb = sample_rgb_from_frame(bytes(frame), patch=patch)
+        self.assertEqual(rgb, (255, 200, 0))
+
+
 class TestPlaybackPairs(unittest.TestCase):
     def test_position_pair_scales_together(self) -> None:
         rec = FxRecording("r", "r", 40, frames=[bytes(8)])
@@ -147,6 +193,9 @@ class TestPatchCsv(unittest.TestCase):
         self.assertEqual(summary["heads"], 1)
         self.assertEqual(summary["htp"], 1)
         self.assertEqual(summary["ltp"], 1)
+        self.assertEqual(len(summary["entries"]), 2)
+        self.assertEqual(summary["entries"][0]["merge"], "HTP")
+        self.assertEqual(summary["entries"][1]["dmx"], "1-023")
 
     def test_parse_dmx_column(self) -> None:
         text = (
@@ -158,6 +207,9 @@ class TestPatchCsv(unittest.TestCase):
         self.assertEqual(patch.channels[0].universe, 1)
         self.assertEqual(patch.channels[0].address, 100)
         self.assertEqual(patch.channels[1].address, 200)
+        tags = patch.channel_tags()
+        self.assertEqual(tags[100], FxTagKind.COLOUR)
+        self.assertEqual(tags[200], FxTagKind.INTENSITY)
 
     def test_reject_bad_merge(self) -> None:
         text = "head_name,universe,address,merge\nA,1,1,MIX\n"

@@ -15,9 +15,12 @@ from .fx_loop import detect_loop_window
 from .fx_palette import (
     PALETTE_FADE_SECONDS,
     PaletteState,
+    apply_rgb_to_colour_channels,
     blend_rgb,
     load_palette_state,
+    new_palette_from_rgb,
     restore_active_palette,
+    sample_rgb_from_frame,
     save_palette_state,
 )
 from .fx_patch import CsvPatchSource, ManualPatchSource, PatchSource
@@ -30,7 +33,6 @@ from .fx_store import (
     save_fx_library,
     tags_as_kinds,
 )
-from .fx_tags import FxTagKind
 from .output import create_sender
 
 DEFAULT_BPM = 128.0
@@ -74,12 +76,14 @@ class FxEngine:
         dry_run: bool = False,
         record_fps: float = 40.0,
         patch_path=None,
+        input_ip: str = "",
     ) -> None:
         self.library_path = library_path
         self.palette_path = palette_path
         self.patch_path = patch_path
         self.output_cfg = output_cfg
         self.input_universe = int(input_universe)
+        self.input_ip = (input_ip or "").strip()
         self.output_universe = int(output_universe)
         self.channel_map = dict(channel_map)
         self.dry_run = dry_run
@@ -94,10 +98,7 @@ class FxEngine:
         self.patch = self._build_patch_source()
 
         self.state = FxEngineState()
-        if self.input_universe == self.output_universe:
-            self.state.universe_warning = (
-                "Record on a universe Companion is not transmitting on."
-            )
+        self._refresh_universe_warning()
         self._last_good_bpm = DEFAULT_BPM
         self.state.bpm = DEFAULT_BPM
 
@@ -114,6 +115,19 @@ class FxEngine:
         self._palette_t0 = time.monotonic()
         self._palette_suppressed = False
         self._on_state: Callable[[dict], None] | None = None
+        self._last_input_mono = 0.0
+        self._input_packets = 0
+        self._fps_window_t0 = time.monotonic()
+        self._fps_window_count = 0
+        self._input_fps = 0.0
+
+    def _refresh_universe_warning(self) -> None:
+        if self.input_universe == self.output_universe:
+            self.state.universe_warning = (
+                "Record on a universe Companion is not transmitting on."
+            )
+        else:
+            self.state.universe_warning = None
 
     def _build_patch_source(self) -> PatchSource:
         if self.imported_patch.channels:
@@ -156,17 +170,46 @@ class FxEngine:
             return
         if not self.dry_run:
             self._sender = create_sender(self.output_cfg)
-        port = 6454 if self.output_cfg.protocol != "sacn" else 5568
-        self._receiver = DmxReceiver(
-            port=port,
-            interface=self.output_cfg.interface,
-            protocol=self.output_cfg.protocol,
-            on_frame=self._on_input_frame,
-        )
-        self._receiver.start()
+        self._start_receiver()
         self._stop.clear()
         self._thread = threading.Thread(target=self._tick, name="fx-engine", daemon=True)
         self._thread.start()
+
+    def _receiver_port(self) -> int:
+        return 6454 if self.output_cfg.protocol != "sacn" else 5568
+
+    def _start_receiver(self) -> None:
+        if self._receiver is not None:
+            self._receiver.stop()
+            self._receiver = None
+        self._receiver = DmxReceiver(
+            port=self._receiver_port(),
+            interface=self.output_cfg.interface if not self.input_ip else "",
+            protocol=self.output_cfg.protocol,
+            bind_host=self.input_ip,
+            on_frame=self._on_input_frame,
+        )
+        self._receiver.start()
+
+    def configure_input(
+        self,
+        *,
+        input_universe: int | None = None,
+        input_ip: str | None = None,
+    ) -> None:
+        """Update listen universe / bind IP; restart the receiver when needed."""
+        restart = False
+        if input_universe is not None and int(input_universe) != self.input_universe:
+            self.input_universe = int(input_universe)
+            restart = True
+        if input_ip is not None:
+            ip = str(input_ip or "").strip()
+            if ip != self.input_ip:
+                self.input_ip = ip
+                restart = True
+        self._refresh_universe_warning()
+        if restart and self._thread is not None:
+            self._start_receiver()
 
     def stop(self) -> None:
         self._stop.set()
@@ -184,8 +227,17 @@ class FxEngine:
     def _on_input_frame(self, universe: int, data: bytes) -> None:
         if universe != self.input_universe:
             return
+        now = time.monotonic()
         with self._lock:
             self._dmx_in[:] = data[:512]
+            self._last_input_mono = now
+            self._input_packets += 1
+            self._fps_window_count += 1
+            elapsed = now - self._fps_window_t0
+            if elapsed >= 1.0:
+                self._input_fps = self._fps_window_count / elapsed
+                self._fps_window_t0 = now
+                self._fps_window_count = 0
             if self.state.recording:
                 self.state.record_frames.append(bytes(data[:512]))
                 n = len(self.state.record_frames)
@@ -234,6 +286,26 @@ class FxEngine:
                 self.palette_state.active_id = palette_id
                 self.save_all()
                 break
+
+    def record_palette(self, name: str = "Palette"):
+        """Capture the current listen-universe look as a colour palette."""
+        with self._lock:
+            frame = bytes(self._dmx_in)
+            age = (
+                time.monotonic() - self._last_input_mono
+                if self._last_input_mono
+                else None
+            )
+        tags = self.patch.channel_tags()
+        rgb = sample_rgb_from_frame(
+            frame,
+            patch=self.imported_patch if self.imported_patch.channels else None,
+            colour_addrs=tags,
+        )
+        pal = new_palette_from_rgb(name, rgb)
+        self.palette_state.palettes.append(pal)
+        self.set_palette(pal.id)
+        return pal, age
 
     def _current_palette_rgb(self) -> tuple[int, int, int]:
         t = time.monotonic() - self._palette_t0
@@ -373,14 +445,35 @@ class FxEngine:
 
         if not self._palette_suppressed:
             pr, pg, pb = self._current_palette_rgb()
-            for ch in range(1, 513):
-                if tags.get(ch) is FxTagKind.COLOUR:
-                    out[ch - 1] = pr if (ch % 3) == 1 else pg if (ch % 3) == 2 else pb
+            apply_rgb_to_colour_channels(
+                out,
+                (pr, pg, pb),
+                patch=self.imported_patch if self.imported_patch.channels else None,
+                colour_addrs=tags,
+            )
 
         with self._lock:
             self._dmx_out[:] = out
 
+    def _input_signal(self) -> dict:
+        now = time.monotonic()
+        with self._lock:
+            last = self._last_input_mono
+            fps = self._input_fps
+            packets = self._input_packets
+        age = (now - last) if last else None
+        live = age is not None and age < 1.0
+        return {
+            "live": live,
+            "fps": round(fps, 1),
+            "packets": packets,
+            "last_packet_age_s": round(age, 2) if age is not None else None,
+        }
+
     def public_state(self) -> dict:
+        patch_summary = None
+        if self.imported_patch.channels:
+            patch_summary = self.imported_patch.summary()
         return {
             "recording": self.state.recording,
             "record_frames": len(self.state.record_frames),
@@ -390,6 +483,8 @@ class FxEngine:
             "palettes": [p.to_dict() for p in self.palette_state.palettes],
             "universe_warning": self.state.universe_warning,
             "input_universe": self.input_universe,
+            "input_ip": self.input_ip,
             "output_universe": self.output_universe,
-            "patch": self.patch.summary() if self.imported_patch.channels else None,
+            "input_signal": self._input_signal(),
+            "patch": patch_summary,
         }

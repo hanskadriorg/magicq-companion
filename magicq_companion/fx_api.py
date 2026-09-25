@@ -183,6 +183,92 @@ def attach_fx_routes(app: web.Application, manager) -> None:
         eng.set_palette(pid)
         return web.json_response({"ok": True, "active_id": pid})
 
+    async def fx_palette_record(request: web.Request) -> web.Response:
+        eng = manager.ensure_fx_engine()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        name = str(body.get("name") or "Palette").strip() or "Palette"
+        pal, age = eng.record_palette(name)
+        return web.json_response(
+            {
+                "ok": True,
+                "palette": pal.to_dict(),
+                "active_id": eng.palette_state.active_id,
+                "input_age_s": age,
+                "signal_live": age is not None and age < 1.0,
+            }
+        )
+
+    async def fx_input_handler(request: web.Request) -> web.Response:
+        """Get or set standalone FX listen universe / bind IP (separate from output)."""
+        if request.method == "GET":
+            eng = manager.fx_engine
+            return web.json_response(
+                {
+                    "input_universe": manager.cfg.fx.input_universe,
+                    "input_ip": manager.cfg.fx.input_ip or "",
+                    "output_universe": manager.cfg.artnet.universe,
+                    "active": eng is not None,
+                }
+            )
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        payload: dict = {}
+        if "input_universe" in body:
+            payload["fx_input_universe"] = body.get("input_universe")
+        if "input_ip" in body:
+            payload["fx_input_ip"] = body.get("input_ip")
+        if not payload:
+            return web.json_response({"error": "input_universe or input_ip required"}, status=400)
+        # Reuse /settings validation path via apply_settings.
+        fx_uni = payload.get("fx_input_universe")
+        fx_ip = payload.get("fx_input_ip")
+        if fx_uni is not None:
+            try:
+                fx_uni = int(fx_uni)
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "input_universe must be a number"}, status=400
+                )
+            if not 0 <= fx_uni <= 63999:
+                return web.json_response(
+                    {"error": "input_universe out of range"}, status=400
+                )
+        if fx_ip is not None:
+            fx_ip = str(fx_ip).strip()
+            if fx_ip:
+                parts = fx_ip.split(".")
+                ok = len(parts) == 4 and all(
+                    p.isdigit() and 0 <= int(p) <= 255 for p in parts
+                )
+                if not ok:
+                    return web.json_response(
+                        {"error": "input_ip must be an IPv4 address or empty"},
+                        status=400,
+                    )
+        try:
+            message = manager.apply_settings(
+                None,
+                None,
+                None,
+                fx_input_universe=fx_uni if "fx_input_universe" in payload else None,
+                fx_input_ip=fx_ip if "fx_input_ip" in payload else None,
+            )
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response(
+            {
+                "ok": True,
+                "message": message,
+                "input_universe": manager.cfg.fx.input_universe,
+                "input_ip": manager.cfg.fx.input_ip or "",
+            }
+        )
+
     async def app_mode_handler(request: web.Request) -> web.Response:
         if request.method == "GET":
             return web.json_response(
@@ -254,3 +340,6 @@ def attach_fx_routes(app: web.Application, manager) -> None:
     app.router.add_get("/api/fx/palette", fx_palette_handler)
     app.router.add_post("/api/fx/palette", fx_palette_handler)
     app.router.add_post("/api/fx/palette/activate", fx_palette_activate)
+    app.router.add_post("/api/fx/palette/record", fx_palette_record)
+    app.router.add_get("/api/fx/input", fx_input_handler)
+    app.router.add_post("/api/fx/input", fx_input_handler)

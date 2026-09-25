@@ -7,8 +7,6 @@ import struct
 import threading
 from collections.abc import Callable
 
-from .netif import bind_to_interface
-
 _ARTNET_HEADER = b"Art-Net\x00"
 _ARTNET_DMX = 0x5000
 _SACN_ID = b"ASC-E1.17\x00\x00\x00"
@@ -76,15 +74,21 @@ class DmxReceiver:
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except (AttributeError, OSError):
             pass
-        # Prefer an explicit listen IP (standalone FX input). Otherwise bind the
-        # named NIC when set; fall back to all interfaces.
+        # Prefer an explicit listen IP (standalone FX input). Otherwise listen on
+        # all addresses (a unicast-IP bind would miss Art-Net broadcasts),
+        # scoped to the named NIC when the kernel allows it.
         if self.bind_host:
             self._sock.bind((self.bind_host, self.port))
         else:
             if self.interface:
-                bind_to_interface(
-                    self._sock, self.interface, multicast=self.protocol == "sacn"
-                )
+                try:
+                    self._sock.setsockopt(
+                        socket.SOL_SOCKET,
+                        socket.SO_BINDTODEVICE,
+                        self.interface.encode(),
+                    )
+                except (AttributeError, OSError):
+                    pass
             self._sock.bind(("", self.port))
         self._thread = threading.Thread(target=self._run, name="dmx-receive", daemon=True)
         self._thread.start()

@@ -250,6 +250,12 @@ class FeatureExtractor:
         self._t += self.dt
         self._frames_seen += 1
 
+        # Some PipeWire/USB devices emit a non-finite startup block while
+        # their graph is being linked. Treat those samples as silence so one
+        # bad block cannot poison the rolling FFT state and kill the analyzer.
+        if not np.isfinite(block).all():
+            block = np.nan_to_num(block, nan=0.0, posinf=0.0, neginf=0.0)
+
         self._buffer = np.roll(self._buffer, -len(block))
         self._buffer[-len(block):] = block
 
@@ -384,6 +390,9 @@ class FeatureExtractor:
         )
         band_rms = np.sqrt(np.maximum(power, 0.0)) / self._win_rms
         db = 20.0 * np.log10(np.maximum(band_rms, 1.1e-5))
+        # np.clip does not remove NaN; one non-finite bin used to kill the
+        # analyzer thread with ValueError in int(round(...)).
+        db = np.nan_to_num(db, nan=-99.0, posinf=6.0, neginf=-99.0)
         self._spec_cache = tuple(int(round(x)) for x in np.clip(db, -99.0, 6.0))
         return self._spec_cache
 

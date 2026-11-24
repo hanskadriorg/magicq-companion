@@ -10,7 +10,7 @@ from pathlib import Path
 
 @dataclass
 class NetworkConfig:
-    """Shared NIC + unicast destination for both audio and Matter DMX."""
+    """Shared NIC + unicast destination for audio DMX output."""
 
     interface: str = ""
     ip: str = "127.0.0.1"
@@ -33,19 +33,6 @@ class ArtNetConfig:
     priority: int = 100
     # Live dashboard Output switch. Boot / process start uses [server] startup_output.
     enabled: bool = True
-
-
-@dataclass
-class MatterConfig:
-    """Matter → MagicQ DMX segment (same NIC as audio, own universe/protocol)."""
-
-    enabled: bool = True
-    protocol: str = "artnet"
-    mode: str = "broadcast"
-    universe: int = 1
-    port: int = 6454
-    fps: int = 40
-    priority: int = 100
 
 
 INPUT_CHANNEL_CHOICES = ("left", "right", "both")
@@ -84,10 +71,71 @@ class ChannelMap:
     drop_hit: int = 7
     # 255 while a 4/4 kick grid is locked in the music (else 0).
     four_four: int = 8
-    # Chase rate vs BPM: 255=full, 128=half, 64=quarter, 32=eighth (energy-picked).
+    # Chase rate vs BPM: 255=full, 128=half, 64=quarter, 32=eighth (pace-picked).
     bpm_rate: int = 9
-    # Momentary drop trigger (standalone: follows button; autopilot: held dark).
-    drop_momentary: int = 10
+    # Dynamic FX size master (0-255): genre baseline + fast bump on energy rises & drops.
+    fx_size: int = 10
+
+
+ARCHETYPE_NAMES = (
+    "ambient_chill",
+    "groovy_warm",
+    "house_tech",
+    "melodic_prog",
+    "club_peak",
+    "hiphop_urban",
+    "fast_bass",
+    "rock_live",
+)
+
+GENRE_MODES = ("auto",) + ARCHETYPE_NAMES
+
+
+def coerce_genre_mode(value: object) -> str:
+    raw = str(value or "auto").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "adaptive": "auto",
+        "ambient": "ambient_chill",
+        "chill": "ambient_chill",
+        "downtempo": "ambient_chill",
+        "deep_house": "groovy_warm",
+        "disco": "groovy_warm",
+        "warm": "groovy_warm",
+        "house": "house_tech",
+        "tech_house": "house_tech",
+        "melodic": "melodic_prog",
+        "trance": "melodic_prog",
+        "progressive": "melodic_prog",
+        "club": "club_peak",
+        "techno": "club_peak",
+        "hiphop": "hiphop_urban",
+        "hip_hop": "hiphop_urban",
+        "rnb": "hiphop_urban",
+        "urban": "hiphop_urban",
+        "dnb": "fast_bass",
+        "drum_and_bass": "fast_bass",
+        "breakbeat": "fast_bass",
+        "rock": "rock_live",
+    }
+    raw = aliases.get(raw, raw)
+    return raw if raw in GENRE_MODES else "auto"
+
+
+@dataclass
+class GenreConfig:
+    """Offline ONNX music genre agent & profile learning settings."""
+
+    enabled: bool = True
+    # "auto" = live ONNX + DSP blending; or lock one of ARCHETYPE_NAMES.
+    mode: str = "auto"
+    # Learn per-genre profiles when operator adjusts macro settings in UI.
+    learning_enabled: bool = True
+    # Seconds between background genre classifications.
+    interval_seconds: float = 3.0
+    # EMA smoothing window (seconds) across archetype probabilities.
+    smooth_seconds: float = 12.0
+    # Optional custom path to discogs-effnet-bsdynamic-1.onnx ("" = models/ default).
+    model_path: str = ""
 
 
 @dataclass
@@ -114,37 +162,34 @@ class DetectionConfig:
     drop_min_bass: float = 0.70
     # How long we must already be in the current section (0 = immediate).
     drop_min_state_seconds: float = 0.15
-    # Channel 9: hold 255 this long after DROP starts, then fade to 0.
+    # Channel 7 (drop_hit): hold 255 this long after DROP starts, then fade to 0.
     drop_hit_seconds: float = 0.15
     drop_hit_fade_seconds: float = 0.0
     # Energy/bass smoothing for drop sensing (smaller = faster, twitchier).
     drop_smooth_seconds: float = 0.08
     # Allow a drop hit while still labelled GROOVE (short/no build).
     drop_from_groove: bool = True
-    # Also fire on a spectral-flux "onset" spike with bass (same family as
-    # librosa onset strength, computed live each hop — no extra library).
+    # Also fire on a spectral-flux "onset" spike with bass.
     drop_use_onset: bool = True
     # 0 = stricter 4/4 lock, 1 = locks on a sloppier / shorter kick run.
     four_four_intensity: float = 0.55
-    # Seconds the 4/4 must hold before channel 11 goes 255, and stay 255
+    # Seconds the 4/4 must hold before channel 8 goes 255, and stay 255
     # after the grid slips. 0 = follow the lock immediately.
     four_four_smooth_seconds: float = 0.4
     # 0 = needs a long kick-out, 1 = breakdown on a shorter gap / weaker bass.
     breakdown_intensity: float = 0.55
-    # Beats of missing kick before a breakdown cue (style still scales this).
+    # Beats of missing kick before a breakdown cue (archetype/style scales this).
     breakdown_beats: float = 4.0
-    # Arrangement style: auto | club | long_build | punchy | breakdown
+    # Manual arrangement override: auto | club | long_build | punchy | breakdown
+    # When "auto", the Genre Agent continuously blends parameters by detected genre.
     style: str = "auto"
-    # Blackout Art-Net/sACN (and Matter DMX) after this long with no music.
+    # Blackout Art-Net/sACN after this long with no music.
     silence_gate: bool = True
     silence_timeout_seconds: float = 600.0
 
 
 STYLE_NAMES = ("auto", "club", "long_build", "punchy", "breakdown")
 
-# Biases applied on top of the user's intensity / decay sliders. These are
-# deliberately far apart: "punchy" reacts in about a third of the time that
-# "long_build" takes, so switching style is audible on the lights.
 STYLE_PROFILES = {
     "club": {
         "build_threshold_mul": 1.00,
@@ -159,6 +204,7 @@ STYLE_PROFILES = {
         "drop_hold_mul": 1.00,
         "drop_rise_mul": 1.00,
         "kick_absent_mul": 1.00,
+        "syncopation_tolerance": 0.15,
     },
     "long_build": {
         "build_threshold_mul": 0.52,
@@ -173,6 +219,7 @@ STYLE_PROFILES = {
         "drop_hold_mul": 1.45,
         "drop_rise_mul": 1.25,
         "kick_absent_mul": 1.10,
+        "syncopation_tolerance": 0.10,
     },
     "punchy": {
         "build_threshold_mul": 1.45,
@@ -187,8 +234,8 @@ STYLE_PROFILES = {
         "drop_hold_mul": 0.55,
         "drop_rise_mul": 0.62,
         "kick_absent_mul": 0.75,
+        "syncopation_tolerance": 0.45,
     },
-    # Prefer atmospheric / kick-out over a 4/4 groove.
     "breakdown": {
         "build_threshold_mul": 1.18,
         "build_decay_mul": 0.70,
@@ -205,6 +252,7 @@ STYLE_PROFILES = {
         "breakdown_need_mul": 0.22,
         "groove_return_mul": 2.40,
         "fizzle_to": "breakdown",
+        "syncopation_tolerance": 0.25,
     },
 }
 
@@ -228,7 +276,6 @@ class BuildScoreConfig:
     full_scale_activity: float = 2.5
 
 
-# Channel-14 chase-rate steps (DMX values).
 BPM_RATE_NAMES = ("eighth", "quarter", "half", "full")
 BPM_RATE_NAME_TO_LEVEL = {
     "eighth": 32,
@@ -248,9 +295,9 @@ def coerce_visualizer_mode(value: object) -> str:
 
 @dataclass
 class UiConfig:
-    """Dashboard options that also change what the Pi computes."""
+    """Dashboard options that also change what the host computes."""
 
-    # When false, the Pi skips the spectrum visualiser (saves CPU/RAM).
+    # When false, skips computing the spectrum visualiser (saves CPU/RAM).
     visualizer: bool = True
     # auto = autoranged bars, absolute = fixed dBFS scale, level = input scope.
     visualizer_mode: str = "auto"
@@ -337,45 +384,24 @@ def _default_reboot_days() -> list[str]:
     return ["mon", "tue", "wed", "thu", "fri"]
 
 
-APP_MODES = ("sound", "standalone_fx")
-
-
-@dataclass
-class AppConfig:
-    """Which program runs on the Pi: automatic sound or standalone FX."""
-
-    mode: str = "sound"
-
-
-@dataclass
-class FxConfig:
-    """Standalone FX: listen on this universe; control channels use [channels]."""
-
-    # Universe MagicQ transmits / Companion records (separate from [artnet] output).
-    input_universe: int = 0
-    # Local IPv4 to bind the Art-Net/sACN listener ("" = all interfaces).
-    # Point the console at this address (or the NIC that owns it).
-    input_ip: str = ""
-    record_fps: float = 40.0
-
-
 @dataclass
 class ServerConfig:
-    """Host defaults from the dashboard Server settings modal."""
+    """Host defaults for unattended operation."""
 
     # Output switch after a process start or host reboot. Not the live toggle.
     startup_output: bool = True
     reboot_enabled: bool = False
     reboot_time: str = "14:00"
     reboot_days: list[str] = field(default_factory=_default_reboot_days)
+    # Seconds between audio capture reconnect attempts if USB/PipeWire drops.
+    audio_reconnect_seconds: float = 3.0
 
 
 @dataclass
 class BpmRateConfig:
-    """How energy maps onto DMX channel 14 (bpm_rate)."""
+    """How intrinsic pace maps onto DMX channel 9 (bpm_rate)."""
 
-    # Inclusive endpoints among: eighth / quarter / half / full.
-    # Quiet energy → min, loud energy → max (order is swapped if inverted).
+    # Inclusive safety bounds among: eighth / quarter / half / full.
     min: str = "eighth"
     max: str = "full"
     # Extra seconds to hold a higher rate before stepping down.
@@ -383,39 +409,47 @@ class BpmRateConfig:
 
 
 @dataclass
+class FxSizeConfig:
+    """Fallback / base parameters for DMX channel 10 (fx_size, 0-255)."""
+
+    base: int = 100
+    max: int = 235
+    reactivity: float = 0.72
+
+
+@dataclass
 class Config:
-    app: AppConfig = field(default_factory=AppConfig)
-    fx: FxConfig = field(default_factory=FxConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     artnet: ArtNetConfig = field(default_factory=ArtNetConfig)
-    matter: MatterConfig = field(default_factory=MatterConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     channels: ChannelMap = field(default_factory=ChannelMap)
+    genre: GenreConfig = field(default_factory=GenreConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     build_score: BuildScoreConfig = field(default_factory=BuildScoreConfig)
     bpm_rate: BpmRateConfig = field(default_factory=BpmRateConfig)
+    fx_size: FxSizeConfig = field(default_factory=FxSizeConfig)
     ui: UiConfig = field(default_factory=UiConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
 
 
 _SECTIONS = {
-    "app": AppConfig,
-    "fx": FxConfig,
     "network": NetworkConfig,
     "artnet": ArtNetConfig,
-    "matter": MatterConfig,
     "audio": AudioConfig,
     "channels": ChannelMap,
+    "genre": GenreConfig,
     "detection": DetectionConfig,
     "build_score": BuildScoreConfig,
     "bpm_rate": BpmRateConfig,
+    "fx_size": FxSizeConfig,
     "ui": UiConfig,
     "server": ServerConfig,
 }
 
+# Entire TOML sections from the personal-rig edition ignored for drop-in upgrades.
+_RETIRED_SECTIONS = frozenset({"app", "fx", "matter"})
 
-# Keys that older config.toml files may still carry. They are read and
-# ignored so an in-place upgrade never fails to start.
+# Keys that older config.toml files may still carry.
 _RETIRED_KEYS = {
     ("detection", "intensity"),
     ("channels", "centroid"),
@@ -423,6 +457,7 @@ _RETIRED_KEYS = {
     ("channels", "energy"),
     ("channels", "kick"),
     ("channels", "melody"),
+    ("channels", "drop_momentary"),
     ("build_score", "weight_brightness"),
     ("build_score", "full_scale_brightness_slope"),
 }
@@ -438,8 +473,14 @@ def load_config(path: str | Path | None) -> Config:
         raise FileNotFoundError(f"Config file not found: {path}")
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    for section_name, cls in _SECTIONS.items():
-        section_data = data.get(section_name, {})
+    for section_name, section_data in data.items():
+        if section_name in _RETIRED_SECTIONS:
+            continue
+        cls = _SECTIONS.get(section_name)
+        if cls is None:
+            raise ValueError(f"Unknown config section: [{section_name}]")
+        if not isinstance(section_data, dict):
+            continue
         target = getattr(cfg, section_name)
         for key, value in section_data.items():
             if (section_name, key) in _RETIRED_KEYS:
@@ -451,9 +492,32 @@ def load_config(path: str | Path | None) -> Config:
     _migrate_legacy_intensity(cfg, data.get("detection", {}))
     _migrate_control_channel_addresses(cfg)
     _sync_shared_network(cfg)
-    cfg.app.mode = _coerce_app_mode(cfg.app.mode)
     cfg.audio.input_channel = coerce_input_channel(cfg.audio.input_channel)
     cfg.audio.noise_floor_db = clamp_noise_floor(cfg.audio.noise_floor_db)
+    cfg.genre.enabled = bool(cfg.genre.enabled)
+    cfg.genre.learning_enabled = bool(cfg.genre.learning_enabled)
+    cfg.genre.mode = coerce_genre_mode(cfg.genre.mode)
+    try:
+        cfg.fx_size.base = max(0, min(255, int(round(float(cfg.fx_size.base)))))
+    except (TypeError, ValueError):
+        cfg.fx_size.base = 100
+    try:
+        cfg.fx_size.max = max(cfg.fx_size.base, min(255, int(round(float(cfg.fx_size.max)))))
+    except (TypeError, ValueError):
+        cfg.fx_size.max = max(cfg.fx_size.base, 235)
+    try:
+        cfg.fx_size.reactivity = max(0.0, min(1.0, float(cfg.fx_size.reactivity)))
+    except (TypeError, ValueError):
+        cfg.fx_size.reactivity = 0.72
+    try:
+        cfg.genre.interval_seconds = max(1.0, min(15.0, float(cfg.genre.interval_seconds)))
+    except (TypeError, ValueError):
+        cfg.genre.interval_seconds = 3.0
+    try:
+        cfg.genre.smooth_seconds = max(1.0, min(60.0, float(cfg.genre.smooth_seconds)))
+    except (TypeError, ValueError):
+        cfg.genre.smooth_seconds = 12.0
+    cfg.genre.model_path = str(cfg.genre.model_path or "").strip()
     cfg.ui.visualizer = bool(cfg.ui.visualizer)
     cfg.ui.visualizer_mode = coerce_visualizer_mode(cfg.ui.visualizer_mode)
     cfg.detection.style = coerce_style(cfg.detection.style)
@@ -465,6 +529,12 @@ def load_config(path: str | Path | None) -> Config:
     cfg.server.reboot_enabled = bool(cfg.server.reboot_enabled)
     cfg.server.reboot_time = parse_reboot_time(cfg.server.reboot_time)
     cfg.server.reboot_days = coerce_reboot_days(cfg.server.reboot_days)
+    try:
+        cfg.server.audio_reconnect_seconds = max(
+            0.5, min(60.0, float(cfg.server.audio_reconnect_seconds))
+        )
+    except (TypeError, ValueError):
+        cfg.server.audio_reconnect_seconds = 3.0
     try:
         cfg.detection.four_four_intensity = max(
             0.0, min(1.0, float(cfg.detection.four_four_intensity))
@@ -529,15 +599,6 @@ def coerce_style(value: str | None) -> str:
     return name if name in STYLE_NAMES else "auto"
 
 
-def coerce_app_mode(value: object) -> str:
-    name = str(value or "sound").strip().lower()
-    return name if name in APP_MODES else "sound"
-
-
-def _coerce_app_mode(value: object) -> str:
-    return coerce_app_mode(value)
-
-
 def _migrate_control_channel_addresses(cfg: Config) -> None:
     from .control_channels import CONTROL_CHANNEL_NAMES, migrate_channel_map_values
 
@@ -563,7 +624,7 @@ def _migrate_legacy_intensity(cfg: Config, section: dict) -> None:
 
 
 def _sync_shared_network(cfg: Config) -> None:
-    """One NIC and unicast IP for both segments; inherit from [artnet] if unset."""
+    """Sync shared NIC and unicast IP with [artnet] if unset."""
     if not cfg.network.interface:
         cfg.network.interface = cfg.artnet.interface
     if not cfg.network.ip or cfg.network.ip == "127.0.0.1":
@@ -583,17 +644,4 @@ def audio_output_cfg(cfg: Config) -> ArtNetConfig:
         universe=cfg.artnet.universe,
         fps=cfg.artnet.fps,
         priority=cfg.artnet.priority,
-    )
-
-
-def matter_output_cfg(cfg: Config) -> ArtNetConfig:
-    return ArtNetConfig(
-        protocol=cfg.matter.protocol,
-        mode=cfg.matter.mode,
-        interface=cfg.network.interface,
-        ip=cfg.network.ip,
-        port=cfg.matter.port,
-        universe=cfg.matter.universe,
-        fps=cfg.matter.fps,
-        priority=cfg.matter.priority,
     )

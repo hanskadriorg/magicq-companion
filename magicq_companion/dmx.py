@@ -35,7 +35,7 @@ def build_frame(
     def set_ch(address: int, value: float) -> None:
         if value != value:  # NaN from silent / missing audio
             value = 0.0
-        dmx[address - 1] = max(0, min(255, int(value)))
+        dmx[address - 1] = max(0, min(255, int(round(value))))
 
     for section, address in (
         (Section.GROOVE, channels.groove),
@@ -66,4 +66,4 @@ def build_frame(
     else:
         set_ch(channels.drop_hit, 0)
     set_ch(channels.bpm_rate, features.bpm_rate)
-    set_ch(channels.drop_momentary, 0)
+    set_ch(channels.fx_size, features.fx_size)

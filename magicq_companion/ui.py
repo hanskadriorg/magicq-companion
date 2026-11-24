@@ -1,12 +1,20 @@
-"""Web dashboard: aiohttp server broadcasting analysis state over WebSocket,
-with runtime control of the input device and Art-Net target."""
+"""Web dashboard: broadcasts live audio, genre, policy, and DMX state over WebSocket,
+with Two-Layer control (Genre Policy Layer with online profile learning +
+Fast Track Reactivity Layer) and unattended host management.
+
+Uses `aiohttp` when installed, with a built-in zero-dependency `asyncio`
+HTTP + RFC 6455 WebSocket fallback.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import threading
@@ -14,29 +22,28 @@ import time
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
-
-from aiohttp import ClientSession, web
+from typing import Any
 
 from .config import (
+    ARCHETYPE_NAMES,
     BPM_RATE_NAMES,
+    GENRE_MODES,
+    INPUT_CHANNEL_CHOICES,
     NOISE_FLOOR_RANGE,
     STYLE_NAMES,
     VISUALIZER_MODES,
     Config,
-    INPUT_CHANNEL_CHOICES,
     audio_output_cfg,
     clamp_noise_floor,
+    coerce_genre_mode,
     coerce_input_channel,
     coerce_reboot_days,
     coerce_style,
     coerce_visualizer_mode,
-    coerce_app_mode,
-    matter_output_cfg,
     try_reboot_time,
 )
-from .control_channels import DEFAULT_RENUMBER, CONTROL_CHANNEL_NAMES
-from .schedule import apply_host_schedule
-from .matter_runtime import MatterOutput, MatterSidecar, describe_matter
+from .control_channels import CONTROL_CHANNEL_NAMES, DEFAULT_RENUMBER
+from .genre_profiles import ARCHETYPE_LABELS, GenrePolicy
 from .output import (
     OUTPUT_PROTOCOLS,
     allowed_modes,
@@ -45,8 +52,9 @@ from .output import (
     describe_output,
     list_ipv4_interfaces,
 )
-from .paths import default_layout_path, fx_library_path, fx_palette_path, fx_patch_path, static_dir
+from .paths import default_genre_profiles_path, default_layout_path, static_dir
 from .pipeline import Bridge
+from .schedule import apply_host_schedule
 
 _DROP_SENSING_FIELDS = {
     "drop_rise_window": (0.12, 2.0),
@@ -58,8 +66,7 @@ _DROP_SENSING_FIELDS = {
 }
 
 _BROADCAST_INTERVAL = 0.05  # 20 updates per second
-_LAYOUT_BOX_IDS = ("settings", "hero", "dmx", "log", "matter", "gamepad")
-# Section changes kept for the dashboard log window.
+_LAYOUT_BOX_IDS = ("hero", "dmx", "log", "settings")
 _SECTION_LOG_LIMIT = 200
 _SECTION_LOG_SECONDS = 180.0
 _HERO_PANES = ("head", "input", "spark", "meters")
@@ -69,14 +76,11 @@ _DEFAULT_LAYOUT = {
     "heroOrder": list(_HERO_PANES),
     "rows": [{"ids": [box_id], "h": 0} for box_id in _LAYOUT_BOX_IDS],
 }
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
 class _Manager:
-    """Owns the analysis worker thread and applies settings changes.
-
-    A device change rebuilds the audio source and restarts the pipeline;
-    an Art-Net change just swaps the sender on the running bridge.
-    """
+    """Owns the supervised analysis worker thread and applies runtime settings."""
 
     def __init__(
         self,
@@ -95,6 +99,7 @@ class _Manager:
         self.duration = duration
         self.config_path = config_path
         self.layout_path = default_layout_path(config_path)
+        self.profiles_path = default_genre_profiles_path(config_path)
         self.simulate = simulate
 
         self.state_lock = threading.Lock()
@@ -110,47 +115,45 @@ class _Manager:
         self.analyzing = True
         self.visualizer = bool(self.cfg.ui.visualizer)
         self.layout = self._load_layout()
-        # Wall-clock section history for the dashboard log window.
         self.section_log: deque[dict] = deque(maxlen=_SECTION_LOG_LIMIT)
         self.log_seq = 0
         self._log_section: str | None = None
-        self._log_started = 0.0
-        self.matter_out: MatterOutput | None = None
-        self.sidecar = MatterSidecar()
-        self.fx_engine = None
 
     # ------------------------------------------------------------------
 
     def start(self, prebuilt: tuple | None = None) -> None:
-        blocks, source_desc = prebuilt or self.source_factory(self.cfg)
         sender = None
         if not self.dry_run:
             sender = create_sender(audio_output_cfg(self.cfg))
-        if self.matter_out is None:
-            self.matter_out = MatterOutput(
-                matter_output_cfg(self.cfg), dry_run=self.dry_run
-            )
-            self.matter_out.enabled = bool(self.cfg.matter.enabled)
-        self.source_desc = source_desc
+        if prebuilt is not None:
+            self.source_desc = prebuilt[1]
         self.bridge = Bridge(
-            self.cfg, blocks, sender=sender, pace=self.pace, duration=self.duration
+            self.cfg,
+            sender=sender,
+            pace=self.pace,
+            duration=self.duration,
+            async_genre=not (self.simulate and not self.pace),
+            profiles_path=self.profiles_path,
         )
         self.bridge.enabled = self.enabled
         self.bridge.analyzing = self.analyzing
         self.bridge.extractor.visualizer = self.visualizer
         self.stop_event = threading.Event()
-        self.worker = threading.Thread(target=self._run, daemon=True)
+        self.worker = threading.Thread(
+            target=self._run,
+            args=(prebuilt,),
+            daemon=True,
+            name="venue-bridge",
+        )
         with self.state_lock:
             self.state["running"] = True
             self.state["enabled"] = self.enabled
             self.state["analyzing"] = self.analyzing
             self.state["visualizer"] = self.visualizer
             if not self.visualizer:
-                self.state["spectrum"] = []
+                self.state["spectrum_db"] = []
             self.state["meta"] = self._meta()
         self.worker.start()
-        if coerce_app_mode(self.cfg.app.mode) == "standalone_fx":
-            self._start_fx_engine()
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -159,7 +162,7 @@ class _Manager:
             close = getattr(blocks, "close", None)
             if callable(close):
                 try:
-                    close()  # ends pw-record/arecord / sounddevice wait
+                    close()
                 except Exception:
                     pass
         if self.worker is not None:
@@ -168,15 +171,25 @@ class _Manager:
 
     def stop_all(self) -> None:
         self.stop()
-        self._stop_fx_engine()
-        if self.matter_out is not None:
-            self.matter_out.close()
-            self.matter_out = None
-        self.sidecar.stop()
 
-    def _run(self) -> None:
+    def _on_source_status(self, desc: str) -> None:
+        self.source_desc = desc
+        with self.state_lock:
+            meta = dict(self.state.get("meta") or self._meta())
+            meta["source"] = desc
+            self.state["meta"] = meta
+
+    def _run(self, prebuilt: tuple | None) -> None:
+        assert self.bridge is not None
         try:
-            self.bridge.run(on_frame=self._on_frame, stop_event=self.stop_event)
+            self.bridge.run_supervised(
+                self.source_factory,
+                initial=prebuilt,
+                reconnect=not self.simulate or self.duration is None,
+                on_frame=self._on_frame,
+                on_status=self._on_source_status,
+                stop_event=self.stop_event,
+            )
         finally:
             with self.state_lock:
                 self.state["running"] = False
@@ -185,11 +198,10 @@ class _Manager:
         f = b.features
         ev = b.tracker.evidence()
         live = bool(b.signal_live)
-        if self.matter_out is not None:
-            self.matter_out.enabled = bool(self.cfg.matter.enabled) and live
         self._record_section(b)
-        if self.fx_engine is not None:
-            self.fx_engine.set_bpm(f.bpm)
+        arch_key = str(ev.get("archetype") or "house_tech")
+        edits_map = b.profile_store.edit_counts()
+        policy_dict = b.policy.to_ui_dict() if self.cfg.genre.enabled else None
         with self.state_lock:
             self.state.update(
                 t=round(b.t, 2),
@@ -202,7 +214,9 @@ class _Manager:
                 music=round(f.music_score, 3),
                 build=round(f.build_score, 3),
                 melody=round(f.melody_score, 3),
+                pace=round(f.pace_score, 3),
                 bpm_rate=round(f.bpm_rate),
+                fx_size=round(f.fx_size),
                 ramp=round(b.tracker.build_progress, 3),
                 beat_age=round(f.seconds_since_beat, 3),
                 rms_db=round(f.rms_db, 1),
@@ -220,18 +234,15 @@ class _Manager:
                 signal_live=live,
                 quiet_s=round(b.quiet_s, 1),
                 log_seq=self.log_seq,
+                genre_mode=self.cfg.genre.mode,
+                learning_enabled=bool(self.cfg.genre.learning_enabled),
+                genre_edits=int(edits_map.get(arch_key, 0)),
+                genre_total_edits=sum(edits_map.values()),
+                policy=policy_dict,
                 **ev,
             )
-            meta = self.state.get("meta")
-            if isinstance(meta, dict):
-                sidecar = self.sidecar.status_label()
-                if meta.get("matter_sidecar") != sidecar:
-                    meta = dict(meta)
-                    meta["matter_sidecar"] = sidecar
-                    self.state["meta"] = meta
 
     def _record_section(self, b: Bridge) -> None:
-        """Append a wall-clock entry whenever the section changes."""
         section = b.tracker.state.value
         if section == self._log_section:
             return
@@ -240,7 +251,6 @@ class _Manager:
             last = self.section_log[-1]
             last["held"] = round(max(0.0, now - float(last["ts"])), 1)
         self._log_section = section
-        self._log_started = now
         self.log_seq += 1
         self.section_log.append(
             {
@@ -249,6 +259,9 @@ class _Manager:
                 "section": section,
                 "held": 0.0,
                 "bpm": round(b.features.bpm, 1),
+                "pace": round(b.features.pace_score, 2),
+                "fx_size": int(round(b.features.fx_size)),
+                "archetype": b.features.archetype_label,
                 "energy": round(b.features.energy_norm, 2),
                 "build": round(b.features.build_score, 2),
                 "level_db": round(b.features.rms_db, 1),
@@ -262,10 +275,7 @@ class _Manager:
         rows = list(self.section_log)
         for i, row in enumerate(rows):
             start = float(row.get("ts") or 0)
-            if i + 1 < len(rows):
-                end = start + float(row.get("held") or 0)
-            else:
-                end = now
+            end = start + float(row.get("held") or 0) if i + 1 < len(rows) else now
             if end >= cutoff:
                 kept.append(row)
         if len(kept) != len(rows):
@@ -275,52 +285,6 @@ class _Manager:
     def _channel_map_dict(self) -> dict[str, int]:
         ch = self.cfg.channels
         return {name: int(getattr(ch, name)) for name in CONTROL_CHANNEL_NAMES}
-
-    def _start_fx_engine(self) -> None:
-        if self.fx_engine is not None:
-            return
-        from .fx_engine import FxEngine
-
-        self.fx_engine = FxEngine(
-            library_path=fx_library_path(self.config_path),
-            palette_path=fx_palette_path(self.config_path),
-            patch_path=fx_patch_path(self.config_path),
-            output_cfg=audio_output_cfg(self.cfg),
-            input_universe=self.cfg.fx.input_universe,
-            input_ip=self.cfg.fx.input_ip,
-            output_universe=self.cfg.artnet.universe,
-            channel_map=self._channel_map_dict(),
-            dry_run=self.dry_run,
-            record_fps=self.cfg.fx.record_fps,
-        )
-        self.fx_engine.start()
-        if self.bridge is not None:
-            self.bridge.enabled = False
-
-    def _stop_fx_engine(self) -> None:
-        if self.fx_engine is None:
-            return
-        self.fx_engine.stop()
-        self.fx_engine = None
-
-    def ensure_fx_engine(self):
-        if self.fx_engine is None:
-            self._start_fx_engine()
-        return self.fx_engine
-
-    def set_app_mode(self, mode: str) -> None:
-        mode = coerce_app_mode(mode)
-        self.cfg.app.mode = mode
-        if mode == "standalone_fx":
-            self._start_fx_engine()
-        else:
-            self._stop_fx_engine()
-            if self.bridge is not None:
-                self.bridge.enabled = self.enabled
-        with self.state_lock:
-            meta = dict(self.state.get("meta") or {})
-            meta["app_mode"] = mode
-            self.state["meta"] = meta
 
     def sections(self) -> list[dict]:
         now = time.time()
@@ -339,16 +303,58 @@ class _Manager:
                 out.append(rec)
         return out
 
+    def genre_profiles_snapshot(self) -> dict[str, Any]:
+        if self.bridge is None:
+            return {"profiles": {}, "total_edits": 0}
+        return {
+            "profiles": self.bridge.profile_store.all_profiles_summary(),
+            "total_edits": self.bridge.profile_store.total_edits(),
+        }
+
+    def reset_genre_profile(self, archetype: str | None) -> str:
+        with self.ctl_lock:
+            if self.bridge is None:
+                return "Bridge not running"
+            target = str(archetype or "current").strip().lower()
+            if target == "current":
+                target = self.bridge.genre.archetype
+            if target != "all" and target not in ARCHETYPE_NAMES:
+                raise ValueError(f"unknown archetype: {target}")
+            self.bridge.profile_store.reset_profiles(target)
+            probs = self.bridge.genre_agent.current_probabilities()
+            self.bridge.policy = self.bridge.profile_store.resolve(probs)
+            with self.state_lock:
+                self.state["policy"] = self.bridge.policy.to_ui_dict()
+                self.state["genre_edits"] = self.bridge.profile_store.edit_counts().get(
+                    self.bridge.genre.archetype, 0
+                )
+                self.state["genre_total_edits"] = self.bridge.profile_store.total_edits()
+                self.state["meta"] = self._meta()
+            if target == "all":
+                return "Reset all 8 genre profiles to factory defaults"
+            return f"Reset {ARCHETYPE_LABELS.get(target, target)} profile to factory defaults"
+
     # ------------------------------------------------------------------
 
     def _meta(self) -> dict:
         audio_cfg = audio_output_cfg(self.cfg)
         artnet = "dry run, not sending" if self.dry_run else describe_output(audio_cfg)
         br = self.cfg.bpm_rate
+        backend = (
+            self.bridge.genre_agent.backend_name
+            if self.bridge is not None
+            else ("auto" if self.cfg.genre.enabled else "off")
+        )
+        policy: GenrePolicy | None = (
+            self.bridge.policy if (self.bridge is not None and self.cfg.genre.enabled) else None
+        )
+        pol_ui = policy.to_ui_dict() if policy is not None else {}
+        edits_total = (
+            self.bridge.profile_store.total_edits() if self.bridge is not None else 0
+        )
         return {
             "source": self.source_desc,
             "artnet": artnet,
-            "matter": describe_matter(self.cfg) if not self.dry_run else "Matter dry run",
             "device": self.cfg.audio.device,
             "input_channel": self.cfg.audio.input_channel,
             "noise_floor_db": self.cfg.audio.noise_floor_db,
@@ -360,20 +366,28 @@ class _Manager:
             "port": self.cfg.artnet.port,
             "universe": self.cfg.artnet.universe,
             "priority": self.cfg.artnet.priority,
-            "matter_protocol": self.cfg.matter.protocol,
-            "matter_mode": coerce_mode(self.cfg.matter.protocol, self.cfg.matter.mode),
-            "matter_port": self.cfg.matter.port,
-            "matter_universe": self.cfg.matter.universe,
-            "matter_priority": self.cfg.matter.priority,
-            "matter_enabled": bool(self.cfg.matter.enabled),
-            "matter_sidecar": self.sidecar.status_label(probe=True),
-            "bpm_rate_min": br.min,
-            "bpm_rate_max": br.max,
-            "bpm_rate_decay": br.decay_seconds,
-            "build_intensity": self.cfg.detection.build_intensity,
-            "drop_intensity": self.cfg.detection.drop_intensity,
-            "build_decay_seconds": self.cfg.detection.build_decay_seconds,
-            "drop_hold_seconds": self.cfg.detection.drop_hold_seconds,
+            "bpm_rate_safety_min": br.min,
+            "bpm_rate_safety_max": br.max,
+            "bpm_rate_min": pol_ui.get("bpm_rate_min", br.min),
+            "bpm_rate_max": pol_ui.get("bpm_rate_max", br.max),
+            "bpm_rate_decay": pol_ui.get("bpm_rate_decay", br.decay_seconds),
+            "fx_size_base": pol_ui.get("fx_size_base", self.cfg.fx_size.base),
+            "fx_size_max": pol_ui.get("fx_size_max", self.cfg.fx_size.max),
+            "fx_size_reactivity": pol_ui.get("fx_size_reactivity", self.cfg.fx_size.reactivity),
+            "genre_enabled": bool(self.cfg.genre.enabled),
+            "genre_mode": self.cfg.genre.mode,
+            "learning_enabled": bool(self.cfg.genre.learning_enabled),
+            "genre_backend": backend,
+            "genre_total_edits": edits_total,
+            "policy": pol_ui,
+            "build_intensity": pol_ui.get("build_intensity", self.cfg.detection.build_intensity),
+            "drop_intensity": pol_ui.get("drop_intensity", self.cfg.detection.drop_intensity),
+            "build_decay_seconds": pol_ui.get(
+                "build_decay_seconds", self.cfg.detection.build_decay_seconds
+            ),
+            "drop_hold_seconds": pol_ui.get(
+                "drop_hold_seconds", self.cfg.detection.drop_hold_seconds
+            ),
             "drop_rise_window": self.cfg.detection.drop_rise_window,
             "drop_rise": self.cfg.detection.drop_rise,
             "drop_energy_jump": self.cfg.detection.drop_energy_jump,
@@ -382,10 +396,16 @@ class _Manager:
             "drop_smooth_seconds": self.cfg.detection.drop_smooth_seconds,
             "drop_from_groove": bool(self.cfg.detection.drop_from_groove),
             "drop_use_onset": bool(self.cfg.detection.drop_use_onset),
-            "four_four_intensity": self.cfg.detection.four_four_intensity,
+            "four_four_intensity": pol_ui.get(
+                "four_four_intensity", self.cfg.detection.four_four_intensity
+            ),
             "four_four_smooth_seconds": self.cfg.detection.four_four_smooth_seconds,
-            "breakdown_intensity": self.cfg.detection.breakdown_intensity,
-            "breakdown_beats": self.cfg.detection.breakdown_beats,
+            "breakdown_intensity": pol_ui.get(
+                "breakdown_intensity", self.cfg.detection.breakdown_intensity
+            ),
+            "breakdown_beats": pol_ui.get(
+                "breakdown_beats", self.cfg.detection.breakdown_beats
+            ),
             "drop_hit_seconds": self.cfg.detection.drop_hit_seconds,
             "drop_hit_fade_seconds": self.cfg.detection.drop_hit_fade_seconds,
             "style": self.cfg.detection.style,
@@ -400,11 +420,8 @@ class _Manager:
             "visualizer": self.visualizer,
             "dry_run": self.dry_run,
             "simulate": self.simulate,
-            "app_mode": coerce_app_mode(self.cfg.app.mode),
             "control_channels": self._channel_map_dict(),
             "control_channel_map_doc": DEFAULT_RENUMBER.document_lines(),
-            "fx_input_universe": self.cfg.fx.input_universe,
-            "fx_input_ip": self.cfg.fx.input_ip,
         }
 
     def _load_layout(self) -> dict:
@@ -417,14 +434,13 @@ class _Manager:
         except (OSError, json.JSONDecodeError, ValueError, TypeError):
             return json.loads(json.dumps(_DEFAULT_LAYOUT))
 
-    def _window_height(self, raw) -> int:
+    @staticmethod
+    def _window_height(raw) -> int:
         try:
             height = int(raw or 0)
         except (TypeError, ValueError):
             return 0
-        if 80 <= height <= 2000:
-            return height
-        return 0
+        return height if 80 <= height <= 2000 else 0
 
     def _normalize_layout(self, data: dict) -> dict:
         rows: list[dict] = []
@@ -449,34 +465,6 @@ class _Manager:
                     seen.add(box_id)
                 if row_ids:
                     rows.append({"ids": row_ids, "h": height})
-        else:
-            placed: list[tuple[int, str, int]] = []
-            raw_windows = data.get("windows")
-            if isinstance(raw_windows, list) and raw_windows:
-                for index, raw in enumerate(raw_windows):
-                    if not isinstance(raw, dict):
-                        continue
-                    box_id = str(raw.get("id", ""))
-                    if box_id not in _LAYOUT_BOX_IDS or box_id in seen:
-                        continue
-                    placed.append((index, box_id, self._window_height(raw.get("h"))))
-                    seen.add(box_id)
-            else:
-                for raw in data.get("items") or []:
-                    if not isinstance(raw, dict):
-                        continue
-                    box_id = str(raw.get("id", ""))
-                    if box_id not in _LAYOUT_BOX_IDS or box_id in seen:
-                        continue
-                    try:
-                        row = int(raw.get("row", 99))
-                    except (TypeError, ValueError):
-                        row = 99
-                    placed.append((row, box_id, self._window_height(raw.get("heightPx"))))
-                    seen.add(box_id)
-            placed.sort()
-            for _order, box_id, height in placed:
-                rows.append({"ids": [box_id], "h": height})
         for box_id in _LAYOUT_BOX_IDS:
             if box_id not in seen:
                 rows.append({"ids": [box_id], "h": 0})
@@ -514,7 +502,7 @@ class _Manager:
         self.layout = layout
         return layout
 
-    def set_enabled(self, enabled: bool, *, notify_matter: bool = True) -> str:
+    def set_enabled(self, enabled: bool) -> str:
         with self.ctl_lock:
             self.enabled = bool(enabled)
             self.cfg.artnet.enabled = self.enabled
@@ -524,9 +512,7 @@ class _Manager:
                 self.state["enabled"] = self.enabled
                 self.state["meta"] = self._meta()
             self._persist()
-            if notify_matter:
-                self.sidecar.push_output_state(self.enabled)
-            return "Output on" if self.enabled else "Output off (Art-Net blackout)"
+            return "Output on" if self.enabled else "Output off (DMX blackout)"
 
     def set_analyzing(self, analyzing: bool) -> str:
         with self.ctl_lock:
@@ -538,7 +524,7 @@ class _Manager:
                 self.state["meta"] = self._meta()
             if self.analyzing:
                 return "Analyzer on"
-            return "Analyzer off (audio drained, Art-Net blackout; UI stays up)"
+            return "Analyzer off (audio drained, DMX blackout; UI stays up)"
 
     def set_visualizer(self, visualizer: bool) -> str:
         with self.ctl_lock:
@@ -549,45 +535,24 @@ class _Manager:
             with self.state_lock:
                 self.state["visualizer"] = self.visualizer
                 if not self.visualizer:
-                    self.state["spectrum"] = []
+                    self.state["spectrum_db"] = []
                 self.state["meta"] = self._meta()
             self._persist()
             if self.visualizer:
                 return "Visualizer on"
-            return "Visualizer off (spectrum not computed on the Pi)"
-
-    def set_visualizer_mode(self, mode: str) -> str:
-        with self.ctl_lock:
-            self.cfg.ui.visualizer_mode = coerce_visualizer_mode(mode)
-            with self.state_lock:
-                self.state["visualizer_mode"] = self.cfg.ui.visualizer_mode
-                self.state["meta"] = self._meta()
-            self._persist()
-            return f"Visualizer mode: {self.cfg.ui.visualizer_mode}"
-
-    def set_noise_floor(self, noise_floor_db: float) -> str:
-        with self.ctl_lock:
-            self.cfg.audio.noise_floor_db = clamp_noise_floor(noise_floor_db)
-            if self.bridge is not None:
-                self.bridge.extractor.noise_floor_db = self.cfg.audio.noise_floor_db
-            with self.state_lock:
-                self.state["noise_floor_db"] = self.cfg.audio.noise_floor_db
-                self.state["meta"] = self._meta()
-            self._persist()
-            return f"Noise floor {self.cfg.audio.noise_floor_db:g} dBFS"
-
-    def snapshot(self) -> dict:
-        with self.state_lock:
-            return dict(self.state)
+            return "Visualizer off (spectrum skipped)"
 
     def apply_settings(
         self,
-        device: str | None,
-        ip: str | None,
-        universe: int | None,
+        device: str | None = None,
+        ip: str | None = None,
+        universe: int | None = None,
         bpm_rate_min: str | None = None,
         bpm_rate_max: str | None = None,
         bpm_rate_decay: float | None = None,
+        fx_size_base: int | None = None,
+        fx_size_max: int | None = None,
+        fx_size_reactivity: float | None = None,
         intensity: float | None = None,
         build_intensity: float | None = None,
         drop_intensity: float | None = None,
@@ -598,15 +563,11 @@ class _Manager:
         port: int | None = None,
         priority: int | None = None,
         interface: str | None = None,
-        matter_protocol: str | None = None,
-        matter_mode: str | None = None,
-        matter_universe: int | None = None,
-        matter_port: int | None = None,
-        matter_priority: int | None = None,
-        matter_enabled: bool | None = None,
         input_channel: str | None = None,
         drop_sensing: dict | None = None,
         style: str | None = None,
+        genre_mode: str | None = None,
+        learning_enabled: bool | None = None,
         silence_gate: bool | None = None,
         noise_floor_db: float | None = None,
         visualizer_mode: str | None = None,
@@ -620,8 +581,6 @@ class _Manager:
         reboot_enabled: bool | None = None,
         reboot_time: str | None = None,
         reboot_days: list[str] | None = None,
-        fx_input_universe: int | None = None,
-        fx_input_ip: str | None = None,
     ) -> str:
         with self.ctl_lock:
             cfg = self.cfg
@@ -638,8 +597,6 @@ class _Manager:
                 and not self.simulate
             )
             audio_changed = False
-            matter_changed = False
-            nic_changed = False
             if interface is not None and str(interface).strip().lower() in (
                 "localhost",
                 "lo",
@@ -647,18 +604,14 @@ class _Manager:
             ):
                 interface = ""
                 mode = "localhost"
-                matter_mode = "localhost"
             if interface is not None and interface != cfg.network.interface:
                 cfg.network.interface = interface
                 cfg.artnet.interface = interface
-                nic_changed = True
                 audio_changed = True
-                matter_changed = True
             if ip is not None and ip != cfg.network.ip:
                 cfg.network.ip = ip
                 cfg.artnet.ip = ip
                 audio_changed = True
-                matter_changed = True
             if protocol is not None and protocol != cfg.artnet.protocol:
                 cfg.artnet.protocol = protocol
                 audio_changed = True
@@ -678,80 +631,117 @@ class _Manager:
             if priority is not None and priority != cfg.artnet.priority:
                 cfg.artnet.priority = priority
                 audio_changed = True
-            if matter_protocol is not None and matter_protocol != cfg.matter.protocol:
-                cfg.matter.protocol = matter_protocol
-                matter_changed = True
-            if matter_mode is not None:
-                matter_mode = coerce_mode(cfg.matter.protocol, matter_mode)
-                if matter_mode != cfg.matter.mode:
-                    cfg.matter.mode = matter_mode
-                    matter_changed = True
-            elif matter_changed:
-                cfg.matter.mode = coerce_mode(cfg.matter.protocol, cfg.matter.mode)
-            if matter_universe is not None and matter_universe != cfg.matter.universe:
-                cfg.matter.universe = matter_universe
-                matter_changed = True
-            if matter_port is not None and matter_port != cfg.matter.port:
-                cfg.matter.port = matter_port
-                matter_changed = True
-            if matter_priority is not None and matter_priority != cfg.matter.priority:
-                cfg.matter.priority = matter_priority
-                matter_changed = True
-            if matter_enabled is not None and bool(matter_enabled) != bool(cfg.matter.enabled):
-                cfg.matter.enabled = bool(matter_enabled)
-                matter_changed = True
-            bpm_changed = False
-            if bpm_rate_min is not None and bpm_rate_min != cfg.bpm_rate.min:
-                cfg.bpm_rate.min = bpm_rate_min
-                bpm_changed = True
-            if bpm_rate_max is not None and bpm_rate_max != cfg.bpm_rate.max:
-                cfg.bpm_rate.max = bpm_rate_max
-                bpm_changed = True
-            if bpm_rate_decay is not None and bpm_rate_decay != cfg.bpm_rate.decay_seconds:
-                cfg.bpm_rate.decay_seconds = bpm_rate_decay
-                bpm_changed = True
+
             if intensity is not None:
                 if build_intensity is None:
                     build_intensity = intensity
                 if drop_intensity is None:
                     drop_intensity = intensity
-            build_changed = False
-            if (
-                build_intensity is not None
-                and build_intensity != cfg.detection.build_intensity
+
+            learning_flag_changed = False
+            if learning_enabled is not None and bool(learning_enabled) != bool(
+                cfg.genre.learning_enabled
             ):
-                cfg.detection.build_intensity = build_intensity
-                build_changed = True
-            if (
-                build_decay_seconds is not None
-                and build_decay_seconds != cfg.detection.build_decay_seconds
+                cfg.genre.learning_enabled = bool(learning_enabled)
+                learning_flag_changed = True
+                if self.bridge is not None:
+                    self.bridge.profile_store.learning_enabled = cfg.genre.learning_enabled
+
+            genre_changed = False
+            if genre_mode is not None:
+                coerced_gm = coerce_genre_mode(genre_mode)
+                if coerced_gm != cfg.genre.mode:
+                    cfg.genre.mode = coerced_gm
+                    genre_changed = True
+                    if self.bridge is not None:
+                        self.bridge.genre_agent.cfg.mode = coerced_gm
+                        self.bridge.genre = self.bridge.genre_agent.refresh_mode()
+                        self.bridge.policy = self.bridge.profile_store.resolve(
+                            self.bridge.genre_agent.current_probabilities()
+                        )
+
+            # ----------------------------------------------------------
+            # Layer 1: Genre Policy & Online Profile Learning
+            # (strictly separate from Layer 2 fast track reactivity!)
+            # ----------------------------------------------------------
+            policy_updates: dict[str, Any] = {}
+            for key, val in (
+                ("bpm_rate_min", bpm_rate_min),
+                ("bpm_rate_max", bpm_rate_max),
+                ("bpm_rate_decay", bpm_rate_decay),
+                ("fx_size_base", fx_size_base),
+                ("fx_size_max", fx_size_max),
+                ("fx_size_reactivity", fx_size_reactivity),
+                ("build_intensity", build_intensity),
+                ("build_decay_seconds", build_decay_seconds),
+                ("drop_intensity", drop_intensity),
+                ("drop_hold_seconds", drop_hold_seconds),
+                ("breakdown_intensity", breakdown_intensity),
+                ("breakdown_beats", breakdown_beats),
+                ("four_four_intensity", four_four_intensity),
             ):
-                cfg.detection.build_decay_seconds = build_decay_seconds
-                build_changed = True
-            drop_changed = False
-            if (
-                drop_intensity is not None
-                and drop_intensity != cfg.detection.drop_intensity
-            ):
-                cfg.detection.drop_intensity = drop_intensity
-                drop_changed = True
-            if (
-                drop_hold_seconds is not None
-                and drop_hold_seconds != cfg.detection.drop_hold_seconds
-            ):
-                cfg.detection.drop_hold_seconds = drop_hold_seconds
-                drop_changed = True
+                if val is not None:
+                    policy_updates[key] = val
+
+            learned_credits: list[tuple[str, float]] = []
+            policy_changed = False
+            if policy_updates:
+                if cfg.genre.enabled and self.bridge is not None:
+                    probs = self.bridge.genre_agent.current_probabilities()
+                    new_policy, learned_credits = self.bridge.profile_store.learn_override(
+                        probs, policy_updates
+                    )
+                    self.bridge.policy = new_policy
+                    policy_changed = True
+
+                # Also update fallback config fields (without shrinking global
+                # bpm_rate outer safety bounds when genre agent is active!).
+                if not cfg.genre.enabled:
+                    if bpm_rate_min is not None:
+                        cfg.bpm_rate.min = bpm_rate_min
+                    if bpm_rate_max is not None:
+                        cfg.bpm_rate.max = bpm_rate_max
+                if bpm_rate_decay is not None:
+                    cfg.bpm_rate.decay_seconds = bpm_rate_decay
+                if fx_size_base is not None:
+                    cfg.fx_size.base = int(fx_size_base)
+                if fx_size_max is not None:
+                    cfg.fx_size.max = max(cfg.fx_size.base, int(fx_size_max))
+                if fx_size_reactivity is not None:
+                    cfg.fx_size.reactivity = float(fx_size_reactivity)
+                if build_intensity is not None:
+                    cfg.detection.build_intensity = build_intensity
+                if build_decay_seconds is not None:
+                    cfg.detection.build_decay_seconds = build_decay_seconds
+                if drop_intensity is not None:
+                    cfg.detection.drop_intensity = drop_intensity
+                if drop_hold_seconds is not None:
+                    cfg.detection.drop_hold_seconds = drop_hold_seconds
+                if breakdown_intensity is not None:
+                    cfg.detection.breakdown_intensity = breakdown_intensity
+                if breakdown_beats is not None:
+                    cfg.detection.breakdown_beats = breakdown_beats
+                if four_four_intensity is not None:
+                    cfg.detection.four_four_intensity = four_four_intensity
+                policy_changed = True
+
+            # ----------------------------------------------------------
+            # Layer 2: Fast Track Reactivity Layer (in-place, zero reset)
+            # ----------------------------------------------------------
             sensing_changed = self._apply_drop_sensing(cfg.detection, drop_sensing)
+
             style_changed = False
             if style is not None and style != cfg.detection.style:
                 cfg.detection.style = style
                 style_changed = True
+
             silence_changed = False
             if silence_gate is not None and bool(silence_gate) != bool(
                 cfg.detection.silence_gate
             ):
                 cfg.detection.silence_gate = bool(silence_gate)
                 silence_changed = True
+
             server_changed = False
             schedule_changed = False
             if startup_output is not None and bool(startup_output) != bool(
@@ -773,32 +763,15 @@ class _Manager:
                 cfg.server.reboot_days = list(reboot_days)
                 server_changed = True
                 schedule_changed = True
-            four_four_changed = False
-            if (
-                four_four_intensity is not None
-                and four_four_intensity != cfg.detection.four_four_intensity
-            ):
-                cfg.detection.four_four_intensity = four_four_intensity
-                four_four_changed = True
+
+            four_four_smooth_changed = False
             if (
                 four_four_smooth_seconds is not None
                 and four_four_smooth_seconds != cfg.detection.four_four_smooth_seconds
             ):
                 cfg.detection.four_four_smooth_seconds = four_four_smooth_seconds
-                four_four_changed = True
-            breakdown_changed = False
-            if (
-                breakdown_intensity is not None
-                and breakdown_intensity != cfg.detection.breakdown_intensity
-            ):
-                cfg.detection.breakdown_intensity = breakdown_intensity
-                breakdown_changed = True
-            if (
-                breakdown_beats is not None
-                and breakdown_beats != cfg.detection.breakdown_beats
-            ):
-                cfg.detection.breakdown_beats = breakdown_beats
-                breakdown_changed = True
+                four_four_smooth_changed = True
+
             drop_hit_changed = False
             if (
                 drop_hit_seconds is not None
@@ -812,6 +785,7 @@ class _Manager:
             ):
                 cfg.detection.drop_hit_fade_seconds = drop_hit_fade_seconds
                 drop_hit_changed = True
+
             input_changed = False
             if noise_floor_db is not None:
                 floor = clamp_noise_floor(noise_floor_db)
@@ -821,51 +795,35 @@ class _Manager:
                         self.bridge.extractor.noise_floor_db = floor
                     input_changed = True
             if visualizer_mode is not None:
-                mode = coerce_visualizer_mode(visualizer_mode)
-                if mode != cfg.ui.visualizer_mode:
-                    cfg.ui.visualizer_mode = mode
+                vmode = coerce_visualizer_mode(visualizer_mode)
+                if vmode != cfg.ui.visualizer_mode:
+                    cfg.ui.visualizer_mode = vmode
                     input_changed = True
 
-            fx_input_changed = False
-            fx_uni = None
-            fx_ip = None
-            if fx_input_universe is not None:
-                fx_uni = int(fx_input_universe)
-                if fx_uni != cfg.fx.input_universe:
-                    cfg.fx.input_universe = fx_uni
-                    fx_input_changed = True
-            if fx_input_ip is not None:
-                fx_ip = str(fx_input_ip or "").strip()
-                if fx_ip != (cfg.fx.input_ip or ""):
-                    cfg.fx.input_ip = fx_ip
-                    fx_input_changed = True
-
-            if (
-                not device_changed
-                and not channel_changed
-                and not audio_changed
-                and not matter_changed
-                and not bpm_changed
-                and not build_changed
-                and not drop_changed
-                and not sensing_changed
-                and not style_changed
-                and not four_four_changed
-                and not breakdown_changed
-                and not drop_hit_changed
-                and not input_changed
-                and not silence_changed
-                and not server_changed
-                and not fx_input_changed
+            if not any(
+                (
+                    device_changed,
+                    channel_changed,
+                    audio_changed,
+                    policy_changed,
+                    sensing_changed,
+                    style_changed,
+                    genre_changed,
+                    learning_flag_changed,
+                    four_four_smooth_changed,
+                    drop_hit_changed,
+                    input_changed,
+                    silence_changed,
+                    server_changed,
+                )
             ):
                 return "No changes to apply."
 
             if device_changed or channel_changed:
                 if device_changed:
-                    cfg.audio.device = device
+                    cfg.audio.device = device  # type: ignore[assignment]
                 if channel_changed:
-                    cfg.audio.input_channel = input_channel
-                # Release the old exclusive capture before opening a new one.
+                    cfg.audio.input_channel = input_channel  # type: ignore[assignment]
                 self.stop()
                 time.sleep(0.08)
                 prebuilt = self.source_factory(cfg)
@@ -877,28 +835,20 @@ class _Manager:
                     old.blackout()
                     old.close()
 
-            if matter_changed and self.matter_out is not None:
-                live = True if self.bridge is None else bool(self.bridge.signal_live)
-                self.matter_out.enabled = bool(cfg.matter.enabled) and live
-                self.matter_out.replace_sender(matter_output_cfg(cfg))
-            if nic_changed:
-                self._restart_sidecar()
-
-            if bpm_changed and self.bridge is not None:
+            if self.bridge is not None:
                 self.bridge.extractor.bpm_rate_cfg = cfg.bpm_rate
-
-            if self.fx_engine is not None:
-                if fx_input_changed:
-                    self.fx_engine.configure_input(
-                        input_universe=cfg.fx.input_universe,
-                        input_ip=cfg.fx.input_ip,
-                    )
-                if audio_changed:
-                    self.fx_engine.output_universe = cfg.artnet.universe
-                    self.fx_engine._refresh_universe_warning()
+                self.bridge.extractor.fx_size_cfg = cfg.fx_size
 
             with self.state_lock:
                 self.state["meta"] = self._meta()
+                self.state["genre_mode"] = cfg.genre.mode
+                self.state["learning_enabled"] = cfg.genre.learning_enabled
+                if self.bridge is not None and cfg.genre.enabled:
+                    self.state["policy"] = self.bridge.policy.to_ui_dict()
+                    self.state["genre_edits"] = self.bridge.profile_store.edit_counts().get(
+                        self.bridge.genre.archetype, 0
+                    )
+                    self.state["genre_total_edits"] = self.bridge.profile_store.total_edits()
             self._persist()
 
             parts = []
@@ -907,33 +857,37 @@ class _Manager:
             if channel_changed:
                 parts.append(f"input channel -> {cfg.audio.input_channel}")
             if audio_changed:
-                parts.append("audio " + describe_output(audio_output_cfg(cfg)))
-            if matter_changed:
-                parts.append(describe_matter(cfg))
-            if fx_input_changed:
-                listen = f"FX listen u{cfg.fx.input_universe}"
-                if cfg.fx.input_ip:
-                    listen += f" @ {cfg.fx.input_ip}"
-                else:
-                    listen += " (all interfaces)"
-                parts.append(listen)
-            if bpm_changed:
+                parts.append("output " + describe_output(audio_output_cfg(cfg)))
+            if genre_changed:
+                parts.append(f"genre agent {cfg.genre.mode}")
+            if learning_flag_changed:
                 parts.append(
-                    f"BPM divider {cfg.bpm_rate.min}…{cfg.bpm_rate.max}, "
-                    f"decay {cfg.bpm_rate.decay_seconds:g}s"
+                    "profile learning on" if cfg.genre.learning_enabled else "profile learning off"
                 )
-            if build_changed:
-                parts.append(
-                    f"build intensity {cfg.detection.build_intensity:.0%}, "
-                    f"decay {cfg.detection.build_decay_seconds:g}s"
-                )
-            if drop_changed:
-                parts.append(
-                    f"drop intensity {cfg.detection.drop_intensity:.0%}, "
-                    f"length {cfg.detection.drop_hold_seconds:g}s"
-                )
+            if "bpm_rate_min" in policy_updates or "bpm_rate_max" in policy_updates or "bpm_rate_decay" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                lo_n = pol.bpm_rate_min_name if pol else cfg.bpm_rate.min
+                hi_n = pol.bpm_rate_max_name if pol else cfg.bpm_rate.max
+                dec_v = pol.bpm_rate_decay if pol else cfg.bpm_rate.decay_seconds
+                parts.append(f"BPM divider {lo_n}…{hi_n} ({dec_v:g}s decay)")
+            if "fx_size_base" in policy_updates or "fx_size_max" in policy_updates or "fx_size_reactivity" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                sb = int(round(pol.fx_size_base)) if pol else cfg.fx_size.base
+                sm = int(round(pol.fx_size_max)) if pol else cfg.fx_size.max
+                sr_v = pol.fx_size_reactivity if pol else cfg.fx_size.reactivity
+                parts.append(f"FX size {sb}–{sm} ({sr_v:.0%} react)")
+            if "build_intensity" in policy_updates or "build_decay_seconds" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                bi = pol.build_intensity if pol else cfg.detection.build_intensity
+                bd = pol.build_decay_seconds if pol else cfg.detection.build_decay_seconds
+                parts.append(f"build {bi:.0%}, decay {bd:g}s")
+            if "drop_intensity" in policy_updates or "drop_hold_seconds" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                di = pol.drop_intensity if pol else cfg.detection.drop_intensity
+                dh = pol.drop_hold_seconds if pol else cfg.detection.drop_hold_seconds
+                parts.append(f"drop {di:.0%}, hold {dh:g}s")
             if sensing_changed:
-                parts.append("drop sensing")
+                parts.append("fast drop sensing")
             if style_changed:
                 parts.append(f"style {cfg.detection.style}")
             if silence_changed:
@@ -951,16 +905,17 @@ class _Manager:
                     parts.append(f"reboot {days} at {cfg.server.reboot_time}")
                 else:
                     parts.append("scheduled reboot off")
-            if four_four_changed:
+            if "four_four_intensity" in policy_updates or four_four_smooth_changed:
+                pol = self.bridge.policy if self.bridge is not None else None
+                ffi = pol.four_four_intensity if pol else cfg.detection.four_four_intensity
                 parts.append(
-                    f"4/4 sensitivity {cfg.detection.four_four_intensity:.0%}, "
-                    f"smoothing {cfg.detection.four_four_smooth_seconds:g}s"
+                    f"4/4 sensitivity {ffi:.0%}, smoothing {cfg.detection.four_four_smooth_seconds:g}s"
                 )
-            if breakdown_changed:
-                parts.append(
-                    f"breakdown intensity {cfg.detection.breakdown_intensity:.0%}, "
-                    f"{cfg.detection.breakdown_beats:g} beats"
-                )
+            if "breakdown_intensity" in policy_updates or "breakdown_beats" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                bdi = pol.breakdown_intensity if pol else cfg.detection.breakdown_intensity
+                bdb = pol.breakdown_beats if pol else cfg.detection.breakdown_beats
+                parts.append(f"breakdown {bdi:.0%}, {bdb:g} beats")
             if drop_hit_changed:
                 parts.append(
                     f"drop hit {cfg.detection.drop_hit_seconds:g}s, "
@@ -982,12 +937,19 @@ class _Manager:
                 except Exception as exc:
                     parts.append(f"schedule not installed: {exc}")
 
-            note = " and ".join(parts)
-            if self.dry_run and (audio_changed or matter_changed):
+            note = " and ".join(parts) if parts else "settings updated"
+            if learned_credits and cfg.genre.learning_enabled:
+                tags_str = " · ".join(
+                    f"{ARCHETYPE_LABELS.get(k, k)} {int(round(w * 100))}%"
+                    for k, w in learned_credits[:2]
+                )
+                note += f" [learned into {tags_str}]"
+            if self.dry_run and audio_changed:
                 note += " (dry run: not sending)"
             return "Applied: " + note
 
-    def _apply_drop_sensing(self, det, raw: dict | None) -> bool:
+    @staticmethod
+    def _apply_drop_sensing(det, raw: dict | None) -> bool:
         if not isinstance(raw, dict):
             return False
         changed = False
@@ -1011,26 +973,17 @@ class _Manager:
                 changed = True
         return changed
 
-    def _restart_sidecar(self) -> None:
-        url = getattr(self, "python_dmx_url", "")
-        if not url:
-            return
-        from .matter_runtime import matter_data_dir
-
-        self.sidecar.restart(
-            interface=self.cfg.network.interface,
-            python_dmx_url=url,
-            data_dir=matter_data_dir(self.config_path),
-        )
-
     def _persist(self) -> None:
-        """Write the changed values back into config.toml, keeping comments."""
+        """Write changed values back into config.toml, keeping comments."""
         if self.config_path is None:
             return
         path = Path(self.config_path)
+        if not path.exists():
+            return
         text = path.read_text()
         text = self._ensure_section(text, "network")
-        text = self._ensure_section(text, "matter")
+        text = self._ensure_section(text, "genre")
+        text = self._ensure_section(text, "fx_size")
         text = self._ensure_section(text, "ui")
         text = self._upsert_in_section(text, "network", "interface", self.cfg.network.interface)
         text = self._upsert_in_section(text, "network", "ip", self.cfg.network.ip)
@@ -1040,18 +993,22 @@ class _Manager:
         text = self._upsert_in_section(text, "artnet", "universe", self.cfg.artnet.universe)
         text = self._upsert_in_section(text, "artnet", "priority", self.cfg.artnet.priority)
         text = self._upsert_in_section(text, "artnet", "enabled", self.cfg.artnet.enabled)
-        text = self._upsert_in_section(text, "matter", "enabled", self.cfg.matter.enabled)
-        text = self._upsert_in_section(text, "matter", "protocol", self.cfg.matter.protocol)
-        text = self._upsert_in_section(text, "matter", "mode", self.cfg.matter.mode)
-        text = self._upsert_in_section(text, "matter", "port", self.cfg.matter.port)
-        text = self._upsert_in_section(text, "matter", "universe", self.cfg.matter.universe)
-        text = self._upsert_in_section(text, "matter", "priority", self.cfg.matter.priority)
         text = self._upsert_in_section(text, "audio", "device", self.cfg.audio.device)
         text = self._upsert_in_section(
             text, "audio", "input_channel", self.cfg.audio.input_channel
         )
         text = self._upsert_in_section(
             text, "audio", "noise_floor_db", float(self.cfg.audio.noise_floor_db)
+        )
+        text = self._upsert_in_section(text, "genre", "enabled", bool(self.cfg.genre.enabled))
+        text = self._upsert_in_section(
+            text, "genre", "learning_enabled", bool(self.cfg.genre.learning_enabled)
+        )
+        text = self._upsert_in_section(text, "genre", "mode", self.cfg.genre.mode)
+        text = self._upsert_in_section(text, "fx_size", "base", int(self.cfg.fx_size.base))
+        text = self._upsert_in_section(text, "fx_size", "max", int(self.cfg.fx_size.max))
+        text = self._upsert_in_section(
+            text, "fx_size", "reactivity", float(self.cfg.fx_size.reactivity)
         )
         det = self.cfg.detection
         for key in (
@@ -1089,18 +1046,16 @@ class _Manager:
         text = self._upsert_in_section(text, "server", "reboot_enabled", bool(srv.reboot_enabled))
         text = self._upsert_in_section(text, "server", "reboot_time", srv.reboot_time)
         text = self._upsert_in_section(text, "server", "reboot_days", list(srv.reboot_days))
-        text = self._ensure_section(text, "fx")
-        text = self._upsert_in_section(text, "fx", "input_universe", int(self.cfg.fx.input_universe))
-        text = self._upsert_in_section(text, "fx", "input_ip", self.cfg.fx.input_ip or "")
-        text = self._upsert_in_section(text, "fx", "record_fps", float(self.cfg.fx.record_fps))
         path.write_text(text)
 
-    def _ensure_section(self, text: str, section: str) -> str:
+    @staticmethod
+    def _ensure_section(text: str, section: str) -> str:
         if re.search(rf"(?m)^\[{re.escape(section)}\]\s*$", text):
             return text
         return text.rstrip() + f"\n\n[{section}]\n"
 
-    def _upsert_in_section(self, text: str, section: str, key: str, value) -> str:
+    @staticmethod
+    def _upsert_in_section(text: str, section: str, key: str, value) -> str:
         if isinstance(value, bool):
             line = f"{key} = {'true' if value else 'false'}"
         elif isinstance(value, int) and not isinstance(value, bool):
@@ -1127,14 +1082,7 @@ class _Manager:
             return re.sub(pattern, repl, text, count=1)
         return text
 
-    def _upsert_toml_str(self, text: str, key: str, value: str) -> str:
-        return self._upsert_in_section(text, "artnet", key, value)
-
-    def _upsert_toml_int(self, text: str, key: str, value: int) -> str:
-        return self._upsert_in_section(text, "artnet", key, value)
-
     def _persist_bpm_rate(self, text: str) -> str:
-        """Update or append the [bpm_rate] section."""
         br = self.cfg.bpm_rate
         section = (
             "[bpm_rate]\n"
@@ -1143,609 +1091,345 @@ class _Manager:
             f"decay_seconds = {br.decay_seconds:g}\n"
         )
         if re.search(r"(?m)^\[bpm_rate\]\s*$", text):
-            text = re.sub(
+            return re.sub(
                 r"(?m)^\[bpm_rate\]\s*\n(?:.*\n)*?(?=^\[|\Z)",
                 section + "\n",
                 text,
                 count=1,
             )
-            return text
         return text.rstrip() + "\n\n" + section
 
 
-def run_ui(
-    cfg: Config,
-    source_factory: Callable,
-    dry_run: bool,
-    pace: bool,
-    duration: float | None,
-    config_path: str | None,
-    simulate: bool,
-    port: int,
-) -> None:
-    manager = _Manager(
-        cfg, source_factory, dry_run, pace, duration, config_path, simulate
-    )
-    manager.start()
-    manager.python_dmx_url = f"http://127.0.0.1:{port}/internal/matter/dmx"
-    from .matter_runtime import matter_data_dir
+# ----------------------------------------------------------------------
+# Shared HTTP Route Logic (used by both aiohttp and stdlib asyncio server)
+# ----------------------------------------------------------------------
 
-    manager.sidecar.keep_alive(
-        interface=cfg.network.interface,
-        python_dmx_url=manager.python_dmx_url,
-        data_dir=matter_data_dir(config_path),
-    )
-    with manager.state_lock:
-        manager.state["meta"] = manager._meta()
-    print(f"Source: {manager.source_desc}")
-    print(f"Audio: {manager._meta()['artnet']}")
-    print(f"Matter: {manager._meta()['matter']}")
 
-    async def index(_request: web.Request) -> web.FileResponse:
-        return web.FileResponse(
-            static_dir() / "index.html",
-            headers={
-                "Cache-Control": "no-store, no-cache, must-revalidate",
-                "Pragma": "no-cache",
-            },
-        )
+def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, dict]:
+    device = body.get("device")
+    input_channel = body.get("input_channel")
+    ip = body.get("ip")
+    universe = body.get("universe")
+    bpm_rate_min = body.get("bpm_rate_min")
+    bpm_rate_max = body.get("bpm_rate_max")
+    bpm_rate_decay = body.get("bpm_rate_decay")
+    fx_size_base = body.get("fx_size_base")
+    fx_size_max = body.get("fx_size_max")
+    fx_size_reactivity = body.get("fx_size_reactivity")
+    intensity = body.get("intensity")
+    build_intensity = body.get("build_intensity")
+    drop_intensity = body.get("drop_intensity")
+    build_decay_seconds = body.get("build_decay_seconds")
+    drop_hold_seconds = body.get("drop_hold_seconds")
+    protocol = body.get("protocol")
+    mode = body.get("mode")
+    port = body.get("port")
+    priority = body.get("priority")
+    interface = body.get("interface")
+    drop_sensing = body.get("drop_sensing")
+    style = body.get("style")
+    genre_mode = body.get("genre_mode")
+    learning_enabled = body.get("learning_enabled")
+    silence_gate = body.get("silence_gate")
+    noise_floor_db = body.get("noise_floor_db")
+    visualizer_mode = body.get("visualizer_mode")
+    four_four_intensity = body.get("four_four_intensity")
+    four_four_smooth_seconds = body.get("four_four_smooth_seconds")
+    breakdown_intensity = body.get("breakdown_intensity")
+    breakdown_beats = body.get("breakdown_beats")
+    drop_hit_seconds = body.get("drop_hit_seconds")
+    drop_hit_fade_seconds = body.get("drop_hit_fade_seconds")
+    startup_output = body.get("startup_output")
+    reboot_enabled = body.get("reboot_enabled")
+    reboot_time = body.get("reboot_time")
+    reboot_days = body.get("reboot_days")
 
-    async def ws_handler(request: web.Request) -> web.WebSocketResponse:
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        try:
-            while not ws.closed:
-                with manager.state_lock:
-                    payload = json.dumps(manager.state)
-                await ws.send_str(payload)
-                await asyncio.sleep(_BROADCAST_INTERVAL)
-        except ConnectionResetError:
-            pass
-        return ws
-
-    async def devices_handler(_request: web.Request) -> web.Response:
-        from .audio import list_input_device_names
-
-        loop = asyncio.get_running_loop()
-        names = await loop.run_in_executor(None, list_input_device_names)
-        return web.json_response(
-            {"devices": names, "current": cfg.audio.device},
-            headers={"Cache-Control": "no-store"},
-        )
-
-    async def config_handler(_request: web.Request) -> web.Response:
-        """Bootstrap settings without waiting for the WebSocket."""
-        from .audio import list_input_device_names
-
-        loop = asyncio.get_running_loop()
-        names = await loop.run_in_executor(None, list_input_device_names)
-        ifaces = await loop.run_in_executor(None, list_ipv4_interfaces)
-        meta = manager._meta()
-        return web.json_response(
-            {
-                "meta": meta,
-                "devices": names,
-                "interfaces": ifaces,
-                "layout": manager.layout,
-            },
-            headers={"Cache-Control": "no-store"},
-        )
-
-    async def settings_handler(request: web.Request) -> web.Response:
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        device = body.get("device")
-        input_channel = body.get("input_channel")
-        ip = body.get("ip")
-        universe = body.get("universe")
-        bpm_rate_min = body.get("bpm_rate_min")
-        bpm_rate_max = body.get("bpm_rate_max")
-        bpm_rate_decay = body.get("bpm_rate_decay")
-        intensity = body.get("intensity")
-        build_intensity = body.get("build_intensity")
-        drop_intensity = body.get("drop_intensity")
-        build_decay_seconds = body.get("build_decay_seconds")
-        drop_hold_seconds = body.get("drop_hold_seconds")
-        protocol = body.get("protocol")
-        mode = body.get("mode")
-        port = body.get("port")
-        priority = body.get("priority")
-        interface = body.get("interface")
-        matter_protocol = body.get("matter_protocol")
-        matter_mode = body.get("matter_mode")
-        matter_universe = body.get("matter_universe")
-        matter_port = body.get("matter_port")
-        matter_priority = body.get("matter_priority")
-        matter_enabled = body.get("matter_enabled")
-        drop_sensing = body.get("drop_sensing")
-        style = body.get("style")
-        silence_gate = body.get("silence_gate")
-        noise_floor_db = body.get("noise_floor_db")
-        visualizer_mode = body.get("visualizer_mode")
-        four_four_intensity = body.get("four_four_intensity")
-        four_four_smooth_seconds = body.get("four_four_smooth_seconds")
-        breakdown_intensity = body.get("breakdown_intensity")
-        breakdown_beats = body.get("breakdown_beats")
-        drop_hit_seconds = body.get("drop_hit_seconds")
-        drop_hit_fade_seconds = body.get("drop_hit_fade_seconds")
-        startup_output = body.get("startup_output")
-        reboot_enabled = body.get("reboot_enabled")
-        reboot_time = body.get("reboot_time")
-        reboot_days = body.get("reboot_days")
-        fx_input_universe = body.get("fx_input_universe")
-        fx_input_ip = body.get("fx_input_ip")
-        if drop_sensing is not None and not isinstance(drop_sensing, dict):
-            return web.json_response({"error": "drop_sensing must be an object"}, status=400)
-        if protocol is not None:
-            protocol = str(protocol).lower()
-            if protocol not in OUTPUT_PROTOCOLS:
-                return web.json_response(
-                    {"error": "protocol must be artnet or sacn"}, status=400
+    if drop_sensing is not None and not isinstance(drop_sensing, dict):
+        return 400, {"error": "drop_sensing must be an object"}
+    if protocol is not None:
+        protocol = str(protocol).lower()
+        if protocol not in OUTPUT_PROTOCOLS:
+            return 400, {"error": "protocol must be artnet or sacn"}
+    if mode is not None:
+        mode = str(mode).lower()
+        proto_for_mode = protocol or manager.cfg.artnet.protocol
+        if mode not in allowed_modes(proto_for_mode):
+            return 400, {
+                "error": (
+                    "Art-Net destination must be unicast, broadcast, or localhost"
+                    if proto_for_mode != "sacn"
+                    else "sACN destination must be unicast, multicast, or localhost"
                 )
-        if mode is not None:
-            mode = str(mode).lower()
-            proto_for_mode = protocol or manager.cfg.artnet.protocol
-            if mode not in allowed_modes(proto_for_mode):
-                return web.json_response(
-                    {
-                        "error": (
-                            "Art-Net destination must be unicast, broadcast, or localhost"
-                            if proto_for_mode != "sacn"
-                            else "sACN destination must be unicast, multicast, or localhost"
-                        )
-                    },
-                    status=400,
-                )
-        if interface is not None:
-            interface = str(interface).strip()
-            if interface.lower() in ("localhost", "lo", "127.0.0.1"):
-                interface = ""
-                mode = "localhost"
-                matter_mode = "localhost"
-            elif interface:
-                known = {i["name"] for i in list_ipv4_interfaces()}
-                if interface not in known:
-                    return web.json_response(
-                        {"error": f"unknown interface: {interface}"}, status=400
-                    )
-        if port is not None:
-            try:
-                port = int(port)
-            except (TypeError, ValueError):
-                return web.json_response({"error": "port must be a number"}, status=400)
-            if not 1 <= port <= 65535:
-                return web.json_response({"error": "port out of range"}, status=400)
-        if priority is not None:
-            try:
-                priority = int(priority)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "priority must be a number"}, status=400
-                )
-            if not 0 <= priority <= 200:
-                return web.json_response(
-                    {"error": "priority must be 0–200"}, status=400
-                )
-        if ip is not None:
-            ip = str(ip).strip()
-            audio_mode_now = coerce_mode(
-                protocol or manager.cfg.artnet.protocol,
-                mode or manager.cfg.artnet.mode,
-            )
-            matter_mode_now = coerce_mode(
-                matter_protocol or manager.cfg.matter.protocol,
-                matter_mode or manager.cfg.matter.mode,
-            )
-            if audio_mode_now != "unicast" and matter_mode_now != "unicast":
-                ip = None
-            else:
-                if not ip:
-                    return web.json_response(
-                        {"error": "IP must not be empty"}, status=400
-                    )
-                if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", ip) and ip != "localhost":
-                    return web.json_response(
-                        {"error": "IP must look like 192.168.1.100"}, status=400
-                    )
-        if device is not None:
-            device = str(device)
-        if input_channel is not None:
-            raw = str(input_channel).strip().lower()
-            aliases = ("l", "r", "1", "2", "stereo", "mix", "lr", "l+r")
-            if raw not in INPUT_CHANNEL_CHOICES and raw not in aliases:
-                return web.json_response(
-                    {"error": "input_channel must be left, right, or both"},
-                    status=400,
-                )
-            input_channel = coerce_input_channel(raw)
-        if universe is not None:
-            try:
-                universe = int(universe)
-            except (TypeError, ValueError):
-                return web.json_response({"error": "universe must be a number"}, status=400)
-            proto_u = protocol or manager.cfg.artnet.protocol
-            hi = 63999 if proto_u == "sacn" else 32767
-            lo = 1 if proto_u == "sacn" else 0
-            if not lo <= universe <= hi:
-                return web.json_response({"error": "universe out of range"}, status=400)
-        if matter_protocol is not None:
-            matter_protocol = str(matter_protocol).lower()
-            if matter_protocol not in OUTPUT_PROTOCOLS:
-                return web.json_response(
-                    {"error": "matter protocol must be artnet or sacn"}, status=400
-                )
-        if matter_mode is not None:
-            matter_mode = str(matter_mode).lower()
-            proto_m = matter_protocol or manager.cfg.matter.protocol
-            if matter_mode not in allowed_modes(proto_m):
-                return web.json_response(
-                    {"error": "Matter destination mode is invalid for that protocol"},
-                    status=400,
-                )
-        if matter_port is not None:
-            try:
-                matter_port = int(matter_port)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "matter port must be a number"}, status=400
-                )
-            if not 1 <= matter_port <= 65535:
-                return web.json_response({"error": "matter port out of range"}, status=400)
-        if matter_priority is not None:
-            try:
-                matter_priority = int(matter_priority)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "matter priority must be a number"}, status=400
-                )
-            if not 0 <= matter_priority <= 200:
-                return web.json_response(
-                    {"error": "matter priority must be 0–200"}, status=400
-                )
-        if matter_universe is not None:
-            try:
-                matter_universe = int(matter_universe)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "matter universe must be a number"}, status=400
-                )
-            proto_mu = matter_protocol or manager.cfg.matter.protocol
-            hi = 63999 if proto_mu == "sacn" else 32767
-            lo = 1 if proto_mu == "sacn" else 0
-            if not lo <= matter_universe <= hi:
-                return web.json_response(
-                    {"error": "matter universe out of range"}, status=400
-                )
-        if matter_enabled is not None:
-            matter_enabled = bool(matter_enabled)
-        if style is not None:
-            style = coerce_style(str(style))
-            if style not in STYLE_NAMES:
-                return web.json_response({"error": "unknown style"}, status=400)
-        if silence_gate is not None:
-            silence_gate = bool(silence_gate)
-        if startup_output is not None:
-            startup_output = bool(startup_output)
-        if reboot_enabled is not None:
-            reboot_enabled = bool(reboot_enabled)
-        if reboot_time is not None:
-            parsed_time = try_reboot_time(reboot_time)
-            if parsed_time is None:
-                return web.json_response(
-                    {"error": "reboot_time must be HH:MM"}, status=400
-                )
-            reboot_time = parsed_time
-        if reboot_days is not None:
-            reboot_days = coerce_reboot_days(reboot_days)
-            enabled_now = (
-                reboot_enabled
-                if reboot_enabled is not None
-                else manager.cfg.server.reboot_enabled
-            )
-            if enabled_now and not reboot_days:
-                return web.json_response(
-                    {"error": "pick at least one reboot day"}, status=400
-                )
-        if bpm_rate_min is not None:
-            bpm_rate_min = str(bpm_rate_min).lower()
-            if bpm_rate_min not in BPM_RATE_NAMES:
-                return web.json_response(
-                    {"error": "bpm_rate_min must be eighth/quarter/half/full"},
-                    status=400,
-                )
-        if bpm_rate_max is not None:
-            bpm_rate_max = str(bpm_rate_max).lower()
-            if bpm_rate_max not in BPM_RATE_NAMES:
-                return web.json_response(
-                    {"error": "bpm_rate_max must be eighth/quarter/half/full"},
-                    status=400,
-                )
-        if bpm_rate_decay is not None:
-            try:
-                bpm_rate_decay = float(bpm_rate_decay)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "bpm_rate_decay must be a number"}, status=400
-                )
-            if not 0.0 <= bpm_rate_decay <= 120.0:
-                return web.json_response(
-                    {"error": "bpm_rate_decay must be 0–120 seconds"}, status=400
-                )
-        if intensity is not None:
-            try:
-                intensity = float(intensity)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "intensity must be a number"}, status=400
-                )
-            if not 0.0 <= intensity <= 1.0:
-                return web.json_response(
-                    {"error": "intensity must be 0–1"}, status=400
-                )
-        if build_intensity is not None:
-            try:
-                build_intensity = float(build_intensity)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "build_intensity must be a number"}, status=400
-                )
-            if not 0.0 <= build_intensity <= 1.0:
-                return web.json_response(
-                    {"error": "build_intensity must be 0–1"}, status=400
-                )
-        if drop_intensity is not None:
-            try:
-                drop_intensity = float(drop_intensity)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "drop_intensity must be a number"}, status=400
-                )
-            if not 0.0 <= drop_intensity <= 1.0:
-                return web.json_response(
-                    {"error": "drop_intensity must be 0–1"}, status=400
-                )
-        if build_decay_seconds is not None:
-            try:
-                build_decay_seconds = float(build_decay_seconds)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "build_decay_seconds must be a number"}, status=400
-                )
-            if not 0.25 <= build_decay_seconds <= 60.0:
-                return web.json_response(
-                    {"error": "build decay must be 0.25–60 seconds"}, status=400
-                )
-        if drop_hold_seconds is not None:
-            try:
-                drop_hold_seconds = float(drop_hold_seconds)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "drop_hold_seconds must be a number"}, status=400
-                )
-            if not 2.0 <= drop_hold_seconds <= 120.0:
-                return web.json_response(
-                    {"error": "drop length must be 2–120 seconds"}, status=400
-                )
-        if noise_floor_db is not None:
-            try:
-                noise_floor_db = float(noise_floor_db)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "noise_floor_db must be a number"}, status=400
-                )
-            lo, hi = NOISE_FLOOR_RANGE
-            if not lo <= noise_floor_db <= hi:
-                return web.json_response(
-                    {"error": f"noise floor must be {lo:g}–{hi:g} dBFS"}, status=400
-                )
-        if visualizer_mode is not None:
-            visualizer_mode = str(visualizer_mode).strip().lower()
-            if visualizer_mode not in VISUALIZER_MODES:
-                return web.json_response(
-                    {"error": "visualizer_mode must be auto, absolute, or level"},
-                    status=400,
-                )
-        if four_four_intensity is not None:
-            try:
-                four_four_intensity = float(four_four_intensity)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "four_four_intensity must be a number"}, status=400
-                )
-            if not 0.0 <= four_four_intensity <= 1.0:
-                return web.json_response(
-                    {"error": "four_four_intensity must be 0–1"}, status=400
-                )
-        if four_four_smooth_seconds is not None:
-            try:
-                four_four_smooth_seconds = float(four_four_smooth_seconds)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "four_four_smooth_seconds must be a number"}, status=400
-                )
-            if not 0.0 <= four_four_smooth_seconds <= 30.0:
-                return web.json_response(
-                    {"error": "4/4 smoothing must be 0–30 seconds"}, status=400
-                )
-        if breakdown_intensity is not None:
-            try:
-                breakdown_intensity = float(breakdown_intensity)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "breakdown_intensity must be a number"}, status=400
-                )
-            if not 0.0 <= breakdown_intensity <= 1.0:
-                return web.json_response(
-                    {"error": "breakdown_intensity must be 0–1"}, status=400
-                )
-        if breakdown_beats is not None:
-            try:
-                breakdown_beats = float(breakdown_beats)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "breakdown_beats must be a number"}, status=400
-                )
-            if not 1.0 <= breakdown_beats <= 16.0:
-                return web.json_response(
-                    {"error": "breakdown_beats must be 1–16"}, status=400
-                )
-        if drop_hit_seconds is not None:
-            try:
-                drop_hit_seconds = float(drop_hit_seconds)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "drop_hit_seconds must be a number"}, status=400
-                )
-            if not 0.0 <= drop_hit_seconds <= 5.0:
-                return web.json_response(
-                    {"error": "drop hit length must be 0–5 seconds"}, status=400
-                )
-        if drop_hit_fade_seconds is not None:
-            try:
-                drop_hit_fade_seconds = float(drop_hit_fade_seconds)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "drop_hit_fade_seconds must be a number"}, status=400
-                )
-            if not 0.0 <= drop_hit_fade_seconds <= 5.0:
-                return web.json_response(
-                    {"error": "drop hit fade must be 0–5 seconds"}, status=400
-                )
-        if fx_input_universe is not None:
-            try:
-                fx_input_universe = int(fx_input_universe)
-            except (TypeError, ValueError):
-                return web.json_response(
-                    {"error": "fx_input_universe must be a number"}, status=400
-                )
-            if not 0 <= fx_input_universe <= 63999:
-                return web.json_response(
-                    {"error": "fx_input_universe out of range"}, status=400
-                )
-        if fx_input_ip is not None:
-            fx_input_ip = str(fx_input_ip).strip()
-            if fx_input_ip:
-                parts = fx_input_ip.split(".")
-                ok = len(parts) == 4 and all(
-                    p.isdigit() and 0 <= int(p) <= 255 for p in parts
-                )
-                if not ok:
-                    return web.json_response(
-                        {"error": "fx_input_ip must be an IPv4 address or empty"},
-                        status=400,
-                    )
-        loop = asyncio.get_running_loop()
-        try:
-            message = await loop.run_in_executor(
-                None,
-                lambda: manager.apply_settings(
-                    device,
-                    ip,
-                    universe,
-                    bpm_rate_min,
-                    bpm_rate_max,
-                    bpm_rate_decay,
-                    intensity,
-                    build_intensity,
-                    drop_intensity,
-                    build_decay_seconds,
-                    drop_hold_seconds,
-                    protocol,
-                    mode,
-                    port,
-                    priority,
-                    interface,
-                    matter_protocol,
-                    matter_mode,
-                    matter_universe,
-                    matter_port,
-                    matter_priority,
-                    matter_enabled,
-                    input_channel,
-                    drop_sensing,
-                    style,
-                    silence_gate,
-                    noise_floor_db,
-                    visualizer_mode,
-                    four_four_intensity,
-                    four_four_smooth_seconds,
-                    breakdown_intensity,
-                    breakdown_beats,
-                    drop_hit_seconds,
-                    drop_hit_fade_seconds,
-                    startup_output,
-                    reboot_enabled,
-                    reboot_time,
-                    reboot_days,
-                    fx_input_universe,
-                    fx_input_ip,
-                ),
-            )
-        except Exception as exc:  # e.g. unknown device name
-            return web.json_response({"error": str(exc)}, status=400)
-        return web.json_response({"ok": True, "message": message})
-
-    async def sections_handler(_request: web.Request) -> web.Response:
-        """Wall-clock section history for the dashboard log window."""
-        return web.json_response(
-            {"sections": manager.sections(), "seq": manager.log_seq},
-            headers={"Cache-Control": "no-store"},
-        )
-
-    async def layout_get_handler(_request: web.Request) -> web.Response:
-        return web.json_response(
-            {"layout": manager.layout, "boxes": list(_LAYOUT_BOX_IDS)},
-            headers={"Cache-Control": "no-store"},
-        )
-
-    async def layout_post_handler(request: web.Request) -> web.Response:
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        layout_data = body.get("layout", body)
-        if not isinstance(layout_data, dict):
-            return web.json_response({"error": "layout must be an object"}, status=400)
-        try:
-            layout = manager.save_layout(layout_data)
-        except (OSError, ValueError, TypeError) as exc:
-            return web.json_response({"error": str(exc)}, status=400)
-        return web.json_response(
-            {"ok": True, "message": "Layout saved", "layout": layout}
-        )
-
-    async def enable_handler(request: web.Request) -> web.Response:
-        """Toggle Art-Net output and/or analyzer without stopping the server."""
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        if "enabled" not in body and "analyzing" not in body and "visualizer" not in body:
-            return web.json_response(
-                {"error": "enabled, analyzing, and/or visualizer required"}, status=400
-            )
-        parts: list[str] = []
-        if "enabled" in body:
-            parts.append(manager.set_enabled(bool(body["enabled"])))
-        if "analyzing" in body:
-            parts.append(manager.set_analyzing(bool(body["analyzing"])))
-        if "visualizer" in body:
-            parts.append(manager.set_visualizer(bool(body["visualizer"])))
-        return web.json_response(
-            {
-                "ok": True,
-                "message": "; ".join(parts),
-                "enabled": manager.enabled,
-                "analyzing": manager.analyzing,
-                "visualizer": manager.visualizer,
             }
+    if interface is not None:
+        interface = str(interface).strip()
+        if interface.lower() in ("localhost", "lo", "127.0.0.1"):
+            interface = ""
+            mode = "localhost"
+        elif interface:
+            known = {i["name"] for i in list_ipv4_interfaces()}
+            if interface not in known:
+                return 400, {"error": f"unknown interface: {interface}"}
+    if port is not None:
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            return 400, {"error": "port must be a number"}
+        if not 1 <= port <= 65535:
+            return 400, {"error": "port out of range"}
+    if priority is not None:
+        try:
+            priority = int(priority)
+        except (TypeError, ValueError):
+            return 400, {"error": "priority must be a number"}
+        if not 0 <= priority <= 200:
+            return 400, {"error": "priority must be 0–200"}
+    if ip is not None:
+        ip = str(ip).strip()
+        audio_mode_now = coerce_mode(
+            protocol or manager.cfg.artnet.protocol,
+            mode or manager.cfg.artnet.mode,
         )
+        if audio_mode_now != "unicast":
+            ip = None
+        else:
+            if not ip:
+                return 400, {"error": "IP must not be empty"}
+            if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", ip) and ip != "localhost":
+                return 400, {"error": "IP must look like 192.168.1.100"}
+    if device is not None:
+        device = str(device)
+    if input_channel is not None:
+        raw = str(input_channel).strip().lower()
+        aliases = ("l", "r", "1", "2", "stereo", "mix", "lr", "l+r")
+        if raw not in INPUT_CHANNEL_CHOICES and raw not in aliases:
+            return 400, {"error": "input_channel must be left, right, or both"}
+        input_channel = coerce_input_channel(raw)
+    if universe is not None:
+        try:
+            universe = int(universe)
+        except (TypeError, ValueError):
+            return 400, {"error": "universe must be a number"}
+        proto_u = protocol or manager.cfg.artnet.protocol
+        hi = 63999 if proto_u == "sacn" else 32767
+        lo = 1 if proto_u == "sacn" else 0
+        if not lo <= universe <= hi:
+            return 400, {"error": "universe out of range"}
+    if style is not None:
+        style = coerce_style(str(style))
+        if style not in STYLE_NAMES:
+            return 400, {"error": "unknown style"}
+    if genre_mode is not None:
+        raw_gm = str(genre_mode).strip().lower().replace("-", "_").replace(" ", "_")
+        coerced_gm = coerce_genre_mode(raw_gm)
+        if raw_gm not in GENRE_MODES and coerced_gm == "auto" and raw_gm not in ("auto", "adaptive"):
+            return 400, {"error": f"unknown genre_mode: {genre_mode}"}
+        genre_mode = coerced_gm
+    if learning_enabled is not None:
+        learning_enabled = bool(learning_enabled)
+    if silence_gate is not None:
+        silence_gate = bool(silence_gate)
+    if startup_output is not None:
+        startup_output = bool(startup_output)
+    if reboot_enabled is not None:
+        reboot_enabled = bool(reboot_enabled)
+    if reboot_time is not None:
+        parsed_time = try_reboot_time(reboot_time)
+        if parsed_time is None:
+            return 400, {"error": "reboot_time must be HH:MM"}
+        reboot_time = parsed_time
+    if reboot_days is not None:
+        reboot_days = coerce_reboot_days(reboot_days)
+        enabled_now = (
+            reboot_enabled
+            if reboot_enabled is not None
+            else manager.cfg.server.reboot_enabled
+        )
+        if enabled_now and not reboot_days:
+            return 400, {"error": "pick at least one reboot day"}
+    if bpm_rate_min is not None:
+        bpm_rate_min = str(bpm_rate_min).lower()
+        if bpm_rate_min not in BPM_RATE_NAMES:
+            return 400, {"error": "bpm_rate_min must be eighth/quarter/half/full"}
+    if bpm_rate_max is not None:
+        bpm_rate_max = str(bpm_rate_max).lower()
+        if bpm_rate_max not in BPM_RATE_NAMES:
+            return 400, {"error": "bpm_rate_max must be eighth/quarter/half/full"}
+    if bpm_rate_decay is not None:
+        try:
+            bpm_rate_decay = float(bpm_rate_decay)
+        except (TypeError, ValueError):
+            return 400, {"error": "bpm_rate_decay must be a number"}
+        if not 0.0 <= bpm_rate_decay <= 120.0:
+            return 400, {"error": "bpm_rate_decay must be 0–120 seconds"}
+    if fx_size_base is not None:
+        try:
+            fx_size_base = int(round(float(fx_size_base)))
+        except (TypeError, ValueError):
+            return 400, {"error": "fx_size_base must be a number"}
+        if not 0 <= fx_size_base <= 255:
+            return 400, {"error": "fx_size_base must be 0–255"}
+    if fx_size_max is not None:
+        try:
+            fx_size_max = int(round(float(fx_size_max)))
+        except (TypeError, ValueError):
+            return 400, {"error": "fx_size_max must be a number"}
+        if not 16 <= fx_size_max <= 255:
+            return 400, {"error": "fx_size_max must be 16–255"}
+    if fx_size_reactivity is not None:
+        try:
+            fx_size_reactivity = float(fx_size_reactivity)
+        except (TypeError, ValueError):
+            return 400, {"error": "fx_size_reactivity must be a number"}
+        if not 0.0 <= fx_size_reactivity <= 1.0:
+            return 400, {"error": "fx_size_reactivity must be 0–1"}
 
-    async def reboot_handler(_request: web.Request) -> web.Response:
-        """Reboot the host (Raspberry Pi). Requires passwordless sudo reboot."""
+    validated_floats: dict[str, float | None] = {
+        "intensity": None,
+        "build_intensity": None,
+        "drop_intensity": None,
+        "build_decay_seconds": None,
+        "drop_hold_seconds": None,
+        "four_four_intensity": None,
+        "four_four_smooth_seconds": None,
+        "breakdown_intensity": None,
+        "breakdown_beats": None,
+        "drop_hit_seconds": None,
+        "drop_hit_fade_seconds": None,
+    }
+    for field_name, val_obj, lo_v, hi_v in (
+        ("intensity", intensity, 0.0, 1.0),
+        ("build_intensity", build_intensity, 0.0, 1.0),
+        ("drop_intensity", drop_intensity, 0.0, 1.0),
+        ("build_decay_seconds", build_decay_seconds, 0.25, 60.0),
+        ("drop_hold_seconds", drop_hold_seconds, 2.0, 120.0),
+        ("four_four_intensity", four_four_intensity, 0.0, 1.0),
+        ("four_four_smooth_seconds", four_four_smooth_seconds, 0.0, 30.0),
+        ("breakdown_intensity", breakdown_intensity, 0.0, 1.0),
+        ("breakdown_beats", breakdown_beats, 1.0, 16.0),
+        ("drop_hit_seconds", drop_hit_seconds, 0.0, 5.0),
+        ("drop_hit_fade_seconds", drop_hit_fade_seconds, 0.0, 5.0),
+    ):
+        if val_obj is not None:
+            try:
+                fval = float(val_obj)
+            except (TypeError, ValueError):
+                return 400, {"error": f"{field_name} must be a number"}
+            if not lo_v <= fval <= hi_v:
+                return 400, {"error": f"{field_name} must be {lo_v:g}–{hi_v:g}"}
+            validated_floats[field_name] = fval
 
+    if noise_floor_db is not None:
+        try:
+            noise_floor_db = float(noise_floor_db)
+        except (TypeError, ValueError):
+            return 400, {"error": "noise_floor_db must be a number"}
+        lo_nf, hi_nf = NOISE_FLOOR_RANGE
+        if not lo_nf <= noise_floor_db <= hi_nf:
+            return 400, {"error": f"noise floor must be {lo_nf:g}–{hi_nf:g} dBFS"}
+    if visualizer_mode is not None:
+        visualizer_mode = str(visualizer_mode).strip().lower()
+        if visualizer_mode not in VISUALIZER_MODES:
+            return 400, {"error": "visualizer_mode must be auto, absolute, or level"}
+
+    try:
+        message = manager.apply_settings(
+            device=device,
+            ip=ip,
+            universe=universe,
+            bpm_rate_min=bpm_rate_min,
+            bpm_rate_max=bpm_rate_max,
+            bpm_rate_decay=bpm_rate_decay,
+            fx_size_base=fx_size_base,
+            fx_size_max=fx_size_max,
+            fx_size_reactivity=fx_size_reactivity,
+            intensity=validated_floats["intensity"],
+            build_intensity=validated_floats["build_intensity"],
+            drop_intensity=validated_floats["drop_intensity"],
+            build_decay_seconds=validated_floats["build_decay_seconds"],
+            drop_hold_seconds=validated_floats["drop_hold_seconds"],
+            protocol=protocol,
+            mode=mode,
+            port=port,
+            priority=priority,
+            interface=interface,
+            input_channel=input_channel,
+            drop_sensing=drop_sensing,
+            style=style,
+            genre_mode=genre_mode,
+            learning_enabled=learning_enabled,
+            silence_gate=silence_gate,
+            noise_floor_db=noise_floor_db,
+            visualizer_mode=visualizer_mode,
+            four_four_intensity=validated_floats["four_four_intensity"],
+            four_four_smooth_seconds=validated_floats["four_four_smooth_seconds"],
+            breakdown_intensity=validated_floats["breakdown_intensity"],
+            breakdown_beats=validated_floats["breakdown_beats"],
+            drop_hit_seconds=validated_floats["drop_hit_seconds"],
+            drop_hit_fade_seconds=validated_floats["drop_hit_fade_seconds"],
+            startup_output=startup_output,
+            reboot_enabled=reboot_enabled,
+            reboot_time=reboot_time,
+            reboot_days=reboot_days,
+        )
+    except Exception as exc:
+        return 400, {"error": str(exc)}
+    return 200, {"ok": True, "message": message}
+
+
+def _dispatch_get_sync(manager: _Manager, path: str) -> tuple[int, str, bytes]:
+    if path == "/":
+        html = (static_dir() / "index.html").read_bytes()
+        return 200, "text/html; charset=utf-8", html
+    if path == "/devices":
+        from .audio import list_input_device_names
+
+        names = list_input_device_names()
+        return (
+            200,
+            "application/json",
+            json.dumps({"devices": names, "current": manager.cfg.audio.device}).encode(),
+        )
+    if path == "/api/config":
+        from .audio import list_input_device_names
+
+        names = list_input_device_names()
+        ifaces = list_ipv4_interfaces()
+        return (
+            200,
+            "application/json",
+            json.dumps(
+                {
+                    "meta": manager._meta(),
+                    "devices": names,
+                    "interfaces": ifaces,
+                    "layout": manager.layout,
+                }
+            ).encode(),
+        )
+    if path == "/api/sections":
+        return (
+            200,
+            "application/json",
+            json.dumps({"sections": manager.sections(), "seq": manager.log_seq}).encode(),
+        )
+    if path == "/api/genre/profiles":
+        return (
+            200,
+            "application/json",
+            json.dumps(manager.genre_profiles_snapshot()).encode(),
+        )
+    if path == "/api/layout":
+        return (
+            200,
+            "application/json",
+            json.dumps({"layout": manager.layout, "boxes": list(_LAYOUT_BOX_IDS)}).encode(),
+        )
+    return 404, "application/json", json.dumps({"error": "not found"}).encode()
+
+
+def _dispatch_post_sync(manager: _Manager, path: str, raw_body: bytes) -> tuple[int, dict]:
+    if path == "/reboot":
         def _reboot() -> None:
             try:
                 manager.stop_all()
@@ -1763,13 +1447,9 @@ def run_ui(
                     continue
 
         threading.Timer(0.4, _reboot).start()
-        return web.json_response(
-            {"ok": True, "message": "Rebooting…"},
-        )
+        return 200, {"ok": True, "message": "Rebooting…"}
 
-    async def shutdown_handler(_request: web.Request) -> web.Response:
-        """Stop analysis, release the port, and exit the process."""
-
+    if path == "/shutdown":
         def _exit() -> None:
             try:
                 manager.stop_all()
@@ -1777,16 +1457,32 @@ def run_ui(
                 os._exit(0)
 
         threading.Timer(0.25, _exit).start()
-        return web.json_response({"ok": True, "message": "Shutting down…"})
+        return 200, {"ok": True, "message": "Shutting down…"}
 
-    async def restart_handler(_request: web.Request) -> web.Response:
-        """Restart Companion only — the host stays up."""
-
+    if path == "/restart":
         def _restart() -> None:
             try:
                 manager.stop_all()
             except Exception:
                 pass
+            env = dict(os.environ)
+            env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+            has_systemd = (
+                subprocess.run(
+                    ["systemctl", "--user", "is-enabled", "magicq-venue.service"],
+                    env=env,
+                    capture_output=True,
+                    check=False,
+                ).returncode
+                == 0
+            )
+            if has_systemd:
+                subprocess.Popen(  # noqa: S603
+                    ["systemctl", "--user", "restart", "magicq-venue.service"],
+                    env=env,
+                    start_new_session=True,
+                )
+                os._exit(0)
             root = (
                 Path(manager.config_path).resolve().parent
                 if manager.config_path
@@ -1815,169 +1511,302 @@ def run_ui(
             os._exit(0)
 
         threading.Timer(0.35, _restart).start()
-        return web.json_response({"ok": True, "message": "Restarting companion…"})
+        return 200, {"ok": True, "message": "Restarting companion…"}
 
-    async def matter_output_handler(request: web.Request) -> web.Response:
-        """The sidecar's companion-output switch reads and drives Output on/off."""
-        peer = request.remote or ""
-        if peer not in ("127.0.0.1", "::1"):
-            return web.json_response({"error": "forbidden"}, status=403)
-        if request.method == "GET":
-            return web.json_response({"enabled": manager.enabled})
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        if "enabled" not in body:
-            return web.json_response({"error": "enabled required"}, status=400)
-        loop = asyncio.get_running_loop()
-        message = await loop.run_in_executor(
-            None, lambda: manager.set_enabled(bool(body["enabled"]), notify_matter=False)
-        )
-        return web.json_response(
-            {"ok": True, "message": message, "enabled": manager.enabled}
-        )
+    try:
+        body = json.loads(raw_body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return 400, {"error": "invalid JSON"}
+    if not isinstance(body, dict):
+        return 400, {"error": "JSON body must be an object"}
 
-    async def matter_dmx_handler(request: web.Request) -> web.Response:
-        peer = request.remote or ""
-        if peer not in ("127.0.0.1", "::1"):
-            return web.json_response({"error": "forbidden"}, status=403)
+    if path == "/api/genre/reset":
         try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        raw = body.get("updates") or {}
-        if not isinstance(raw, dict):
-            return web.json_response({"error": "updates must be an object"}, status=400)
-        updates: dict[int, int] = {}
-        for key, value in raw.items():
-            try:
-                updates[int(key)] = int(value)
-            except (TypeError, ValueError):
-                continue
-        if manager.matter_out is not None:
-            manager.matter_out.apply_updates(updates)
-        return web.json_response({"ok": True})
+            msg = manager.reset_genre_profile(body.get("archetype"))
+        except ValueError as exc:
+            return 400, {"error": str(exc)}
+        return 200, {"ok": True, "message": msg}
 
-    async def matter_proxy_handler(request: web.Request) -> web.Response:
-        suffix = request.match_info.get("path", "")
-        url = f"{manager.sidecar.base_url}/api/{suffix}"
-        if request.query_string:
-            url = f"{url}?{request.query_string}"
+    if path == "/api/layout":
+        layout_data = body.get("layout", body)
+        if not isinstance(layout_data, dict):
+            return 400, {"error": "layout must be an object"}
         try:
-            body = await request.read()
+            layout = manager.save_layout(layout_data)
+        except (OSError, ValueError, TypeError) as exc:
+            return 400, {"error": str(exc)}
+        return 200, {"ok": True, "message": "Layout saved", "layout": layout}
+
+    if path == "/enable":
+        if "enabled" not in body and "analyzing" not in body and "visualizer" not in body:
+            return 400, {"error": "enabled, analyzing, and/or visualizer required"}
+        parts: list[str] = []
+        if "enabled" in body:
+            parts.append(manager.set_enabled(bool(body["enabled"])))
+        if "analyzing" in body:
+            parts.append(manager.set_analyzing(bool(body["analyzing"])))
+        if "visualizer" in body:
+            parts.append(manager.set_visualizer(bool(body["visualizer"])))
+        return 200, {
+            "ok": True,
+            "message": "; ".join(parts),
+            "enabled": manager.enabled,
+            "analyzing": manager.analyzing,
+            "visualizer": manager.visualizer,
+        }
+
+    if path == "/settings":
+        return _validate_and_apply_settings(manager, body)
+
+    return 404, {"error": "not found"}
+
+
+# ----------------------------------------------------------------------
+# Zero-Dependency Stdlib asyncio HTTP + RFC 6455 WebSocket Fallback
+# ----------------------------------------------------------------------
+
+
+def _ws_encode_text(text: str) -> bytes:
+    data = text.encode("utf-8")
+    n = len(data)
+    if n < 126:
+        header = bytes((0x81, n))
+    elif n < 65536:
+        header = struct.pack("!BBH", 0x81, 126, n)
+    else:
+        header = struct.pack("!BBQ", 0x81, 127, n)
+    return header + data
+
+
+async def _ws_drain_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        while True:
+            hdr = await reader.readexactly(2)
+            opcode = hdr[0] & 0x0F
+            masked = (hdr[1] & 0x80) != 0
+            length = hdr[1] & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", await reader.readexactly(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", await reader.readexactly(8))[0]
+            mask_key = await reader.readexactly(4) if masked else b""
+            payload = await reader.readexactly(length) if length else b""
+            if masked and payload:
+                payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+            if opcode == 0x8:
+                writer.write(b"\x88\x00")
+                await writer.drain()
+                break
+            if opcode == 0x9:
+                pong_len = min(len(payload), 125)
+                writer.write(bytes((0x8A, pong_len)) + payload[:pong_len])
+                await writer.drain()
+    except (asyncio.IncompleteReadError, ConnectionError, OSError):
+        return
+
+
+async def _run_stdlib_server(manager: _Manager, host: str, port: int) -> None:
+    loop = asyncio.get_running_loop()
+
+    async def handle_client(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            raw_head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=10.0)
         except Exception:
-            body = b""
-        headers = {}
-        ctype = request.headers.get("Content-Type")
-        if ctype:
-            headers["Content-Type"] = ctype
-        timeout = aiohttp_timeout()
+            writer.close()
+            return
+
+        lines = raw_head.decode("iso-8859-1", errors="replace").split("\r\n")
+        if not lines or not lines[0]:
+            writer.close()
+            return
+        parts = lines[0].split(" ")
+        if len(parts) < 2:
+            writer.close()
+            return
+        method = parts[0].upper()
+        path = parts[1].split("?", 1)[0]
+        headers: dict[str, str] = {}
+        for line in lines[1:]:
+            if ":" in line:
+                k, v = line.split(":", 1)
+                headers[k.strip().lower()] = v.strip()
+
+        if (
+            method == "GET"
+            and path == "/ws"
+            and headers.get("upgrade", "").lower() == "websocket"
+            and "sec-websocket-key" in headers
+        ):
+            key = headers["sec-websocket-key"]
+            accept = base64.b64encode(
+                hashlib.sha1((key + _WS_GUID).encode("ascii")).digest()
+            ).decode("ascii")
+            handshake = (
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Accept: {accept}\r\n\r\n"
+            )
+            writer.write(handshake.encode("ascii"))
+            await writer.drain()
+            drain_task = asyncio.create_task(_ws_drain_client(reader, writer))
+            try:
+                while not drain_task.done():
+                    with manager.state_lock:
+                        payload = json.dumps(manager.state)
+                    writer.write(_ws_encode_text(payload))
+                    await writer.drain()
+                    await asyncio.sleep(_BROADCAST_INTERVAL)
+            except (ConnectionError, OSError):
+                pass
+            finally:
+                drain_task.cancel()
+                writer.close()
+            return
+
+        content_len = int(headers.get("content-length") or "0")
+        body = b""
+        if content_len > 0:
+            try:
+                body = await asyncio.wait_for(reader.readexactly(content_len), timeout=10.0)
+            except Exception:
+                writer.close()
+                return
+
+        if method == "GET":
+            status, ctype, payload_bytes = await loop.run_in_executor(
+                None, _dispatch_get_sync, manager, path
+            )
+        elif method == "POST":
+            status, resp_obj = await loop.run_in_executor(
+                None, _dispatch_post_sync, manager, path, body
+            )
+            ctype = "application/json"
+            payload_bytes = json.dumps(resp_obj).encode("utf-8")
+        else:
+            status = 405
+            ctype = "application/json"
+            payload_bytes = b'{"error":"method not allowed"}'
+
+        reason = {200: "OK", 400: "Bad Request", 404: "Not Found", 405: "Method Not Allowed"}.get(
+            status, "OK"
+        )
+        resp_head = (
+            f"HTTP/1.1 {status} {reason}\r\n"
+            f"Content-Type: {ctype}\r\n"
+            f"Content-Length: {len(payload_bytes)}\r\n"
+            "Cache-Control: no-store, no-cache, must-revalidate\r\n"
+            "Connection: close\r\n\r\n"
+        )
         try:
-            async with ClientSession() as session:
-                async with session.request(
-                    request.method,
-                    url,
-                    data=body if body else None,
-                    headers=headers,
-                    timeout=timeout,
-                ) as resp:
-                    payload = await resp.read()
-                    return web.Response(
-                        body=payload,
-                        status=resp.status,
-                        content_type=resp.content_type,
-                    )
-        except Exception as exc:
-            dmx_url = getattr(manager, "python_dmx_url", "")
-            if dmx_url and not manager.sidecar.available():
-                from .matter_runtime import matter_data_dir
+            writer.write(resp_head.encode("ascii") + payload_bytes)
+            await writer.drain()
+        except OSError:
+            pass
+        finally:
+            writer.close()
 
-                manager.sidecar.keep_alive(
-                    interface=manager.cfg.network.interface,
-                    python_dmx_url=dmx_url,
-                    data_dir=matter_data_dir(manager.config_path),
-                )
-                try:
-                    async with ClientSession() as session:
-                        async with session.request(
-                            request.method,
-                            url,
-                            data=body if body else None,
-                            headers=headers,
-                            timeout=timeout,
-                        ) as resp:
-                            payload = await resp.read()
-                            return web.Response(
-                                body=payload,
-                                status=resp.status,
-                                content_type=resp.content_type,
-                            )
-                except Exception:
-                    pass
-            hint = manager.sidecar.last_error or str(exc)
-            if not manager.sidecar.available():
-                hint = manager.sidecar.last_error or (
-                    "Matter sidecar is not running. Install Node.js 20+ and restart Companion."
-                )
-            return web.json_response({"error": hint}, status=503)
+    server = await asyncio.start_server(handle_client, host=host, port=port)
+    async with server:
+        await server.serve_forever()
 
-    def aiohttp_timeout():
-        from aiohttp import ClientTimeout
 
-        return ClientTimeout(total=30)
+def build_aiohttp_app(manager: _Manager):
+    """Build the `aiohttp.web.Application` when `aiohttp` is installed."""
+    from aiohttp import web
+
+    async def get_route(request: web.Request) -> web.Response:
+        loop = asyncio.get_running_loop()
+        status, ctype, body = await loop.run_in_executor(
+            None, _dispatch_get_sync, manager, request.path
+        )
+        return web.Response(
+            body=body,
+            status=status,
+            content_type=ctype.split(";", 1)[0],
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
+
+    async def post_route(request: web.Request) -> web.Response:
+        raw = await request.read()
+        loop = asyncio.get_running_loop()
+        status, obj = await loop.run_in_executor(
+            None, _dispatch_post_sync, manager, request.path, raw
+        )
+        return web.json_response(obj, status=status)
+
+    async def ws_handler(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        try:
+            while not ws.closed:
+                with manager.state_lock:
+                    payload = json.dumps(manager.state)
+                await ws.send_str(payload)
+                await asyncio.sleep(_BROADCAST_INTERVAL)
+        except ConnectionResetError:
+            pass
+        return ws
 
     app = web.Application()
-    app.router.add_get("/", index)
+    app.router.add_get("/", get_route)
     app.router.add_get("/ws", ws_handler)
-    app.router.add_get("/devices", devices_handler)
-    app.router.add_get("/api/config", config_handler)
-    app.router.add_get("/api/sections", sections_handler)
-    app.router.add_get("/api/layout", layout_get_handler)
-    app.router.add_post("/api/layout", layout_post_handler)
-    app.router.add_post("/settings", settings_handler)
-    app.router.add_post("/enable", enable_handler)
-    app.router.add_post("/reboot", reboot_handler)
-    app.router.add_post("/restart", restart_handler)
-    app.router.add_post("/shutdown", shutdown_handler)
-    app.router.add_post("/internal/matter/dmx", matter_dmx_handler)
-    app.router.add_get("/internal/matter/output", matter_output_handler)
-    app.router.add_post("/internal/matter/output", matter_output_handler)
-    app.router.add_route("*", "/api/matter/{path:.*}", matter_proxy_handler)
-    mapper_dir = static_dir() / "pixel_mapper"
+    app.router.add_get("/devices", get_route)
+    app.router.add_get("/api/config", get_route)
+    app.router.add_get("/api/sections", get_route)
+    app.router.add_get("/api/genre/profiles", get_route)
+    app.router.add_get("/api/layout", get_route)
+    app.router.add_post("/api/layout", post_route)
+    app.router.add_post("/api/genre/reset", post_route)
+    app.router.add_post("/settings", post_route)
+    app.router.add_post("/enable", post_route)
+    app.router.add_post("/reboot", post_route)
+    app.router.add_post("/restart", post_route)
+    app.router.add_post("/shutdown", post_route)
+    return app
 
-    async def pixel_redirect(_request: web.Request) -> web.StreamResponse:
-        raise web.HTTPFound("/pixel-mapper/")
 
-    async def pixel_files(request: web.Request) -> web.FileResponse:
-        rel = request.match_info.get("path", "") or "index.html"
-        dest = (mapper_dir / rel).resolve()
-        root = mapper_dir.resolve()
-        if dest != root and root not in dest.parents:
-            raise web.HTTPNotFound()
-        if dest.is_dir():
-            dest = dest / "index.html"
-        if not dest.is_file():
-            raise web.HTTPNotFound()
-        return web.FileResponse(dest)
-
-    from .fx_api import attach_fx_routes
-
-    attach_fx_routes(app, manager)
-
-    app.router.add_get("/pixel-mapper", pixel_redirect)
-    app.router.add_get("/pixel-mapper/", pixel_files)
-    app.router.add_get("/pixel-mapper/{path:.*}", pixel_files)
-
+def run_ui(
+    cfg: Config,
+    source_factory: Callable,
+    dry_run: bool,
+    pace: bool,
+    duration: float | None,
+    config_path: str | None,
+    simulate: bool,
+    port: int,
+) -> None:
+    manager = _Manager(
+        cfg, source_factory, dry_run, pace, duration, config_path, simulate
+    )
+    prebuilt = None
+    if simulate:
+        prebuilt = source_factory(cfg)
+    manager.start(prebuilt)
+    with manager.state_lock:
+        manager.state["meta"] = manager._meta()
+    print(f"Source: {manager.source_desc}")
+    print(f"Audio: {manager._meta()['artnet']}")
+    print(f"Genre agent: {cfg.genre.mode} ({manager._meta()['genre_backend']})")
     print(f"Dashboard: http://localhost:{port}")
+
     try:
-        web.run_app(app, host="0.0.0.0", port=port, print=None)
+        try:
+            from aiohttp import web  # type: ignore[import-not-found]
+
+            app = build_aiohttp_app(manager)
+            web.run_app(app, host="0.0.0.0", port=port, print=None)
+        except ImportError:
+            asyncio.run(_run_stdlib_server(manager, host="0.0.0.0", port=port))
+    except KeyboardInterrupt:
+        pass
     except OSError as exc:
         if getattr(exc, "errno", None) == 98 or "address already in use" in str(exc):
             raise SystemExit(
-                f"Port {port} is already in use (another bridge UI still running?).\n"
-                f"Stop it with:  fuser -k {port}/tcp\n"
-                f"Or open the existing dashboard and click Restart companion,\n"
+                f"Port {port} is already in use (another companion UI still running?).\n"
+                f"Open the existing dashboard and click Restart companion,\n"
                 f"or pick another port:  python -m magicq_companion --ui --ui-port {port + 1}"
             ) from None
         raise

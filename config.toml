@@ -1,70 +1,59 @@
-# MagicQ Companion configuration
-
-[app]
-# sound = audio autopilot (default). standalone_fx = console FX recorder/player.
-mode = "sound"
-
-[fx]
-# Universe to listen to when recording console Art-Net/sACN (not our output).
-input_universe = 0
-# Local IPv4 bind for the listener ("" = all interfaces). Keep separate from [network] ip.
-input_ip = ""
-record_fps = 40
+# MagicQ Venue Companion configuration (unattended venue edition)
 #
-# All detection values have sensible defaults for techno/house.
-# Start by only changing [artnet] ip and, if needed, [audio] device.
+# Compatible drop-in with MagicQ Companion control channels 1-9.
+# Both T14 and T15 run the universal adaptive Genre Agent by default.
 
-# Shared NIC and unicast destination for BOTH audio and Matter DMX.
 [network]
 # Local network interface to send from ("" = system default). e.g. "eth0".
 interface = ""
-# Unicast destination IP (used when a segment is set to unicast).
-ip = "2.0.0.15"
+# Unicast destination IP (used when [artnet] mode = "unicast").
+ip = "127.0.0.1"
 
 [artnet]
-# Audio analysis → MagicQ. protocol = "artnet" | "sacn"
-protocol = "artnet"
+# Audio analysis -> MagicQ. protocol = "artnet" | "sacn"
+protocol = "sacn"
 # Destination: Art-Net = unicast|broadcast|localhost; sACN = unicast|multicast|localhost.
-mode = "broadcast"
-# UDP port (Art-Net 6454, sACN 5568). Auto-switched when protocol changes
-# if still at the other protocol's default.
-port = 6454
-# Universe: Art-Net is often 0-based; sACN uses 1–63999.
-universe = 0
+mode = "localhost"
+# UDP port (Art-Net 6454, sACN 5568).
+port = 5568
+# Universe: Art-Net is often 0-based; sACN uses 1-63999 (default 10 on MagicQ localhost).
+universe = 10
 # How many DMX frames per second to send.
 fps = 40
-# sACN source priority (0–200). Higher wins if multiple sources share a universe.
+# sACN source priority (0-200).
 priority = 100
 # Live dashboard Output switch. Boot / process start uses [server] startup_output.
 enabled = true
 
-# Host defaults from the dashboard Server settings modal.
-# startup_output is the Output switch after Companion starts.
-# The live Output toggle does not change that.
 [server]
+# Output switch after Companion starts or host reboots.
 startup_output = true
 reboot_enabled = false
 reboot_time = "14:00"
 reboot_days = ["mon", "tue", "wed", "thu", "fri"]
-
-# Matter lights → MagicQ on the SAME interface, optionally a different universe/protocol.
-[matter]
-enabled = true
-protocol = "artnet"
-mode = "broadcast"
-port = 6454
-universe = 1
-fps = 40
-priority = 100
+# Seconds between automatic capture reconnect attempts if USB/PipeWire resets.
+audio_reconnect_seconds = 3.0
 
 [audio]
+noise_floor_db = -55
 samplerate = 44100
 blocksize = 512
-# Substring of the input device name ("" = system default input).
+# Substring of the input device name ("" or "pipewire" = system default input).
 # Run `python -m magicq_companion --list-devices` to see options.
 device = "pipewire"
 # Analyse left, right, or both (average). Use left for a mono card.
 input_channel = "left"
+
+[genre]
+# Offline ONNX music genre classifier + continuous archetype blending.
+enabled = true
+learning_enabled = true
+# "auto" = adapt dynamically to any genre played, or lock one archetype:
+# ambient_chill | groovy_warm | house_tech | melodic_prog | club_peak | hiphop_urban | fast_bass | rock_live
+mode = "auto"
+interval_seconds = 3.0
+smooth_seconds = 12.0
+model_path = ""
 
 # DMX channel assignments (1-based addresses within the universe).
 # Section channels are 255 while that section is active, 0 otherwise.
@@ -75,93 +64,74 @@ buildup = 3
 drop = 4
 # Continuous 0-255 ramp that rises during a build-up and slams to 255 on the drop.
 build_progress = 5
-# Toggles 0↔255 on every detected kick (hard edges for MagicQ BPM input).
+# Toggles 0<->255 on every detected kick (hard edges for MagicQ BPM input).
 beat_pulse = 6
 # 255 at DROP start for drop_hit_seconds, then fades over drop_hit_fade_seconds.
-# Channel 4 stays high for the whole drop look; this one is the impact flash.
 drop_hit = 7
 # 255 while a 4/4 kick grid is locked, 0 when it isn't.
 four_four = 8
-# Chase speed vs BPM from energy: 255=full, 128=½, 64=¼, 32=⅛ (no fades).
+# Chase speed vs BPM from intrinsic pace + genre: 255=full, 128=1/2, 64=1/4, 32=1/8.
 bpm_rate = 9
-drop_momentary = 10
+# Dynamic FX size master (0-255): genre baseline + fast bump on energy rises & drops.
+fx_size = 10
 
-# Channel 14 (bpm_rate): energy → BPM divider within an allowed band.
+# Safety floor/ceiling for DMX channel 9 (bpm_rate).
+# Within this band, the Genre Agent and Intrinsic Pace Score steer chase speed.
 [bpm_rate]
 min = "eighth"
 max = "full"
 decay_seconds = 3
 
+[fx_size]
+base = 100
+max = 235
+reactivity = 0.72
+
 [detection]
-# Bass level (relative to its rolling average, 1.0 = average) below which
-# the kick is considered absent -> breakdown.
 kick_absent_below = 0.45
-# Bass level above which the kick is considered present.
 kick_present_above = 0.80
-# Build score (0-1) above which we consider a build-up to be happening.
 build_score_on = 0.5
-# Seconds of consistent evidence required before switching section.
 evidence_seconds = 2.0
-# Minimum seconds to stay in a section before a normal (non-drop) switch.
 min_dwell_seconds = 6.0
-# How long the DROP section is held before returning to GROOVE.
-# Also adjustable live from the web UI ("Drop length").
 drop_hold_seconds = 10
-# A build-up that lasts this long without a drop falls back to GROOVE.
 build_timeout_seconds = 30.0
-# Expected build-up length in seconds (paces the build_progress ramp).
 expected_build_seconds = 12.0
-# Drop trigger: energy now vs energy drop_rise_window seconds ago (ratio).
 drop_energy_jump = 1.35
-# Fast drop: energy_norm must rise by this much inside drop_rise_window.
 drop_rise_window = 0.5
-drop_rise = 0.40
-drop_min_bass = 0.70
+drop_rise = 0.4
+drop_min_bass = 0.7
 drop_min_state_seconds = 0.15
 drop_hit_seconds = 0.15
-drop_hit_fade_seconds = 0.0
+drop_hit_fade_seconds = 0
 drop_smooth_seconds = 0.08
 drop_from_groove = true
 drop_use_onset = true
-# Rolling baseline window in seconds (adapts to DJ gain changes).
 baseline_seconds = 45.0
-# 0 = groove/monotonous (harder), 1 = aggressive (easier). Independent sliders.
 build_intensity = 0.55
 drop_intensity = 0.55
-# Seconds BUILDUP can sit below the build threshold before falling back to GROOVE.
-build_decay_seconds = 8.0
-# 4/4 lock (channel 11): higher intensity locks easier; smoothing delays on/off.
+build_decay_seconds = 8
 four_four_intensity = 0.55
 four_four_smooth_seconds = 0.4
-# Breakdown: higher intensity enters sooner; beats is how long the kick must be gone.
 breakdown_intensity = 0.55
-breakdown_beats = 4.0
-# Arrangement style: auto | club | long_build | punchy | breakdown
+breakdown_beats = 4
+# Manual style override: auto | club | long_build | punchy | breakdown
 style = "auto"
-# Blackout DMX after this many seconds of hiss/silence (music resumes it).
 silence_gate = true
 silence_timeout_seconds = 600
 
-# Weights for the build score (normalized at runtime).
-# Slopes = rising tension; lift/divergence catch slow filter opens.
 [build_score]
-weight_energy = 0.22
-weight_treble = 0.16
+weight_energy = 0.24
+weight_treble = 0.20
 weight_onsets = 0.16
-weight_brightness = 0.14
-weight_lift = 0.16
-weight_divergence = 0.10
-weight_activity = 0.06
+weight_lift = 0.20
+weight_divergence = 0.12
+weight_activity = 0.08
 full_scale_energy_slope = 0.04
 full_scale_treble_slope = 0.05
 full_scale_onset_slope = 0.8
-full_scale_brightness_slope = 0.04
 full_scale_lift = 0.18
 full_scale_activity = 2.5
 
-# Dashboard options that also change what the Pi computes.
 [ui]
-# Spectrum bars. Off skips that work on the Pi (saves RAM/CPU).
 visualizer = true
-# auto = fill the pane, absolute = real dBFS, level = input loudness over time.
 visualizer_mode = "auto"

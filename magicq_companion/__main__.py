@@ -1,4 +1,4 @@
-"""Entry point for MagicQ Companion.
+"""Entry point for MagicQ Venue Companion.
 
 Usage examples:
     python -m magicq_companion --list-devices
@@ -12,15 +12,14 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .config import audio_output_cfg, load_config
+from .config import Config, audio_output_cfg, load_config
 from .monitor import Monitor
 from .output import create_sender, describe_output
-from .paths import default_config_path, is_frozen
+from .paths import default_config_path, default_genre_profiles_path, is_frozen
 from .pipeline import Bridge
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    # Double-click / Start Menu launch on Windows should open the dashboard.
     if argv is None:
         argv = sys.argv[1:]
         if is_frozen() and not argv:
@@ -28,7 +27,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         prog="magicq_companion",
-        description="MagicQ Companion: audio analysis and Matter lights to Art-Net/sACN.",
+        description="MagicQ Venue Companion: adaptive genre & audio autopilot to Art-Net/sACN.",
     )
     parser.add_argument(
         "--config", default=None,
@@ -40,7 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--simulate", action="store_true",
-        help="Use a synthetic techno track instead of live audio input",
+        help="Use a synthetic multi-genre venue showcase instead of live audio input",
     )
     parser.add_argument(
         "--fast", action="store_true",
@@ -48,11 +47,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Analyze and display, but do not send Art-Net",
+        help="Analyze and display, but do not send Art-Net/sACN",
     )
     parser.add_argument(
         "--target", default=None,
-        help="Override Art-Net target IP from the config",
+        help="Override Art-Net/sACN target IP from the config",
     )
     parser.add_argument(
         "--duration", type=float, default=None,
@@ -75,14 +74,12 @@ def build_source(args: argparse.Namespace, cfg: Config):
     hop = cfg.audio.blocksize
 
     if args.simulate:
-        from .simulate import generate_blocks
+        from .simulate import generate_venue_blocks
 
-        blocks = (block for _, block in generate_blocks(sr, hop))
-        return blocks, "simulated techno track"
+        loop_forever = not args.fast or args.duration is not None
+        blocks = (block for _, block in generate_venue_blocks(sr, hop, loop=loop_forever))
+        return blocks, "simulated multi-genre venue set"
 
-    # USB interfaces often show up in PipeWire but not PortAudio. Prefer
-    # pw-record when the configured name matches a PipeWire source; otherwise
-    # use sounddevice, and fall back to pw-record if PortAudio can't see it.
     from .audio import open_capture
 
     return open_capture(
@@ -123,9 +120,6 @@ def main() -> int:
         )
         return 0
 
-    blocks, source_desc = build_source(args, cfg)
-    print(f"Source: {source_desc}")
-
     sender = None
     out_desc = "dry run, not sending"
     if not args.dry_run:
@@ -135,23 +129,28 @@ def main() -> int:
 
     bridge = Bridge(
         cfg,
-        blocks,
         sender=sender,
         pace=args.simulate and not args.fast,
         duration=args.duration,
+        async_genre=not (args.simulate and args.fast),
+        profiles_path=default_genre_profiles_path(config_path),
     )
+    bridge.enabled = bool(cfg.server.startup_output)
 
     monitor = Monitor()
     try:
-        bridge.run(
-            on_frame=lambda b: monitor.update(b.t, b.features, b.tracker)
+        bridge.run_supervised(
+            lambda c: build_source(args, c),
+            reconnect=not args.simulate,
+            on_frame=lambda b: monitor.update(b.t, b.features, b.tracker),
+            on_status=lambda s: print(f"Source: {s}"),
         )
     except KeyboardInterrupt:
         pass
     finally:
         monitor.close()
         if sender is not None:
-            print("Sent blackout frame and closed Art-Net socket.")
+            print("Sent blackout frame and closed DMX socket.")
 
     return 0
 

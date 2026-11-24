@@ -1,257 +1,82 @@
-# MagicQ Companion
+# MagicQ Venue Companion
 
-Club lighting companion for ChamSys MagicQ: live audio analysis, Matter
-virtual lights, and a single Art-Net/sACN stack you can extend later.
+Unattended venue lighting autopilot for ChamSys MagicQ with an **offline ONNX music-genre agent** and **compression-invariant pace & section DSP**.
 
-This is **v2.0.0**, renamed from `magicq-audio-matter-bridge`. It grew out of
-[magicq-audio-bridge](https://github.com/hanskadriorg/magicq-audio-bridge)
-and [matter-artnet-bridge](https://github.com/hanskadriorg/matter-artnet-bridge).
-
-Audio analysis and Matter lights both send **real Art-Net/sACN** to MagicQ
-on the same NIC, with a separate protocol/universe per segment.
+Designed for dedicated venue computers (such as **T14** and **T15**) running MagicQ unattended across shifting nights, DJs, and genres — without personal-rig extras (Standalone FX, Matter-to-DMX, Node.js sidecar, and Pixel Mapper are stripped).
 
 ```text
-[DJ mixer] --> [audio analysis] --Art-Net/sACN universe A--> [MagicQ]
-[phone / Home] --> [Matter nodes] --Art-Net/sACN universe B--> [MagicQ]
-                              \ same NIC /
+[DJ mixer] --> [Audio + Watchdog] --> [Offline ONNX Genre Agent (400 genres -> 8 archetypes)]
+                                  \-> [True BPM (60-190) + Intrinsic Pace DSP]
+                                           \-- Art-Net / sACN (Ch 1-9) --> [MagicQ]
 ```
 
-Network output supports **Art-Net** (unicast or broadcast) or **sACN
-(E1.31)** (unicast or multicast) per segment. Pick the NIC once in Settings;
-configure `[network]`, `[artnet]` (audio), and `[matter]` in `config.toml`.
+## Key capabilities
 
-## What audio sends
+- **Universal Offline Genre Agent (`magicq_companion/genre_agent.py`)**:
+  - Runs Essentia's **Discogs-EffNet** (`discogs-effnet-bsdynamic-1.onnx`, 400 genres/subgenres) locally on CPU every 3 seconds over an 8-second 16 kHz Slaney log-mel buffer — zero internet dependency in the venue, with a built-in harmonic/percussive + tempogram DSP fallback if model weights are absent.
+  - Smoothly blends probabilities across **8 Musical Archetypes** (`ambient_chill`, `groovy_warm`, `house_tech`, `melodic_prog`, `club_peak`, `hiphop_urban`, `fast_bass`, `rock_live`) over a 12-second EMA so neither stage PC is locked to a single style.
+- **True Tempo (`60–190 BPM`) & Intrinsic Pace Score (`magicq_companion/features.py`)**:
+  - Replaces the old `90–180 BPM` octave clamp so slow `70–89 BPM` R&B, Hip-Hop, Reggaeton, and Downtempo tracks stay at their true tempo instead of doubling to `140–178 BPM`.
+  - Replaces relative-RMS quartile stretching with a compression-invariant **Intrinsic Pace Score** (transient density, 2–8 kHz hi-hat subdivision rate, kick punch, true tempo, and genre arousal) so quiet/slow songs stay on `1/8`–`1/4` chases (`32`/`64`) while brickwall-mastered peak club tracks stay energized on `1/2`–`1/1` (`128`/`255`) — and `174 BPM` Drum & Bass grooves cap at `128` (`1/2`, ~87 BPM feel) while unlocking `255` on peak drops.
+- **Syncopated Groove Stability (`magicq_companion/state_machine.py`)**:
+  - Adapts breakdown detection to non-4/4 drum patterns (`hiphop_urban`, `fast_bass`, `rock_live`) so 2-step, breakbeat, and trap grooves do not falsely flicker into `BREAKDOWN`.
+- **Unattended Audio Watchdog (`magicq_companion/pipeline.py`)**:
+  - Automatically recovers and reconnects if PipeWire restarts or a USB audio interface briefly drops out mid-event.
 
-One Art-Net universe (default: universe 0) with these channels:
+## Outgoing DMX channels (unchanged MagicQ contract)
 
-| DMX ch | Name           | Behaviour                                                    |
-|--------|----------------|--------------------------------------------------------------|
-| 1      | groove         | 255 while the steady main section of the track is playing    |
-| 2      | breakdown      | 255 while the kick is gone (atmospheric section)             |
-| 3      | buildup        | 255 while tension is rising toward a drop                    |
-| 4      | drop           | 255 for ~16 s after the drop hits                            |
-| 5      | build_progress | Ramps 0 to 255 during a build-up, slams to 255 on the drop   |
-| 6      | beat_pulse     | Toggles 0↔255 on every kick (hard edges for MagicQ BPM)      |
-| 9      | drop_hit       | 255 for the hit length after DROP, then optional fade to 0   |
-| 11     | four_four      | 255 while a 4/4 kick grid is locked, 0 when it isn’t         |
-| 14     | bpm_rate       | 255/128/64/32 = full/½/¼/⅛ BPM chase rate (by energy)       |
+| DMX ch | Name | Behaviour |
+|--------|------|-----------|
+| 1 | `groove` | `255` while the main section is playing |
+| 2 | `breakdown` | `255` while the kick/beat drops out |
+| 3 | `buildup` | `255` while tension is rising toward a drop |
+| 4 | `drop` | `255` for the drop hold duration |
+| 5 | `build_progress` | Ramps `0` to `255` during a build-up, `255` on drop |
+| 6 | `beat_pulse` | Hard `0`/`255` toggle on every detected beat |
+| 7 | `drop_hit` | One-shot `255` flash at drop start |
+| 8 | `four_four` | `255` while a steady 4/4 kick grid is locked |
+| 9 | `bpm_rate` | `32` / `64` / `128` / `255` (`1/8` / `1/4` / `1/2` / `1/1`) from Genre Agent + Intrinsic Pace |
+| 10 | `fx_size` | `0`–`255` dynamic FX Size Master: genre base + fast bump on energy rises & drops |
 
-Exactly one of channels 1-4 is at 255 at any time. Channel 9 is a
-one-shot impact trigger (strobe / cue / macro); channel 4 holds the
-drop look for the full hold time. Channel 11 is a lock flag that stays
-at 255 while a regular 4/4 kick grid is held (not a metronome pulse).
-Channel 14 picks a tempo divisor from energy (range + decay hold are
-set in the UI / `[bpm_rate]` in `config.toml`) and snaps between
-32/64/128/255. Channel numbers are configurable in `config.toml`.
+Existing `config.toml` files from `magicq-companion` (including legacy channel addresses or `[app]`, `[fx]`, and `[matter]` sections) load cleanly without modification.
 
-The dashboard also has **analyzer on/off**, **output on/off** (audio Art-Net
-blackout), Matter device pairing QR codes, a **build/drop intensity** slider,
-**drop length**, editable **grid layout**, and a **reboot** button for headless
-Raspberry Pi installs.
+## Setup on T14 & T15 (Linux)
 
-## Matter devices
-
-Create Switch, Dimmer, RGB fixture, or Companion-output Matter nodes in the
-dashboard, then scan the QR in Apple Home / Google Home / OSRAM SMART+.
-Matter is LAN-only unless a hub on this network stays in the fabric.
-
-| Device type | Matter clusters | DMX channels |
-|-------------|-----------------|--------------|
-| Switch | OnOff | 1 channel: `0` off / `255` on |
-| Dimmer | OnOff + LevelControl | 1 intensity channel `0`–`255` |
-| RGB fixture | OnOff + LevelControl + ColorControl | Intensity, R, G, B |
-| Companion output | OnOff plug | Toggles this unit's Art-Net/sACN output |
-
-All Matter fixtures share the **Matter → MagicQ** protocol/universe from
-Settings. Pairing identities live in `data/matter/`. Matter mDNS is bound to
-the same NIC as DMX.
-
-Requires **Node.js 20+** (in addition to Python) so the matter.js sidecar can
-run. The first `--ui` start runs `npm install` and `npm run build` in
-`matter_sidecar/`.
-
-## Setup
-
-Requires Python 3.11+, Node.js 20+, and PortAudio (Linux: `sudo apt install libportaudio2`).
+### Automated LAN deploy from a laptop on the venue network
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+git fetch origin cursor/venue-genre-agent-d386
+git checkout cursor/venue-genre-agent-d386
+python3 scripts/deploy_venue_lan.py neli-t14@192.168.1.110 neli-t15@192.168.1.200
 ```
 
-Edit `config.toml`:
+This pre-fetches the offline Discogs-EffNet ONNX model locally once, preserves each machine's existing `config.toml` (audio device, noise floor, and MagicQ network/universe), stops any previous `magicq-companion` instance cleanly, installs `.venv` + `onnxruntime`, enables `magicq-venue.service` (`Restart=always`), and verifies live HTTP + WebSocket telemetry on both `http://192.168.1.110:8765` and `http://192.168.1.200:8765`.
 
-- `[network] ip` — MagicQ unicast address (when a segment is unicast)
-- `[network] interface` — NIC for both audio and Matter DMX + Matter mDNS
-- `[artnet]` — audio universe / protocol / mode
-- `[matter]` — Matter universe / protocol / mode
-- `[audio] device` — substring of the input device name
-  (list devices with `python -m magicq_companion --list-devices`)
+### Direct install on a single venue PC
 
-Feed the program a clean audio signal: the DJ mixer's booth/record output
-into an audio interface input is ideal. A room microphone works but is
-noisier and will make detection less reliable.
-
-## Run
+Requires Python 3.11+ and PortAudio / PipeWire (`sudo apt install libportaudio2`). No Node.js required.
 
 ```bash
-# Live audio, sending Art-Net as configured:
-.venv/bin/python -m magicq_companion
+./packaging/install-venue.sh
+```
 
-# Same, with the web dashboard at http://localhost:8765
+This creates `.venv`, installs `numpy`, `sounddevice`, `aiohttp`, and `onnxruntime`, downloads `models/discogs-effnet-bsdynamic-1.onnx` + `.json` once for offline operation, and enables the `magicq-venue.service` user unit (`Restart=always`).
+
+## Manual / CLI usage
+
+```bash
+# Fetch offline ONNX genre model once:
+.venv/bin/python scripts/fetch_models.py
+
+# Run with the live web dashboard at http://localhost:8765:
 .venv/bin/python -m magicq_companion --ui
 
-# Test the whole pipeline with a built-in synthetic techno track:
-.venv/bin/python -m magicq_companion --simulate
+# Test end-to-end with the built-in multi-genre venue showcase (Deep House -> Hip-Hop -> Techno -> DnB):
+.venv/bin/python -m magicq_companion --simulate --ui
 
-# Analyze only, no Art-Net (safe to try anywhere):
+# Fast headless verification without sending DMX:
 .venv/bin/python -m magicq_companion --simulate --dry-run --fast
+
+# Export as a standalone repository folder (e.g. ../magicq-venue):
+./scripts/export_venue_repo.sh ../magicq-venue
 ```
-
-The console shows the detected section, BPM, and live meters. On exit the
-program sends a blackout frame on its universe so no input channels stay up.
-
-## Windows exe / MSI
-
-Yes — you can ship a self-contained Windows build with Python and all
-dependencies (numpy, sounddevice/PortAudio, aiohttp) baked in. PyInstaller
-**must be run on Windows** (cross-compiling from Linux is not reliable).
-
-### Portable zip (recommended)
-
-On a Windows machine, from the repo root:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
-```
-
-Output:
-
-- `dist\MagicQCompanion\MagicQCompanion.exe` — double-click starts the UI
-- `dist\MagicQCompanion-windows.zip` — copy this folder anywhere
-
-Settings are stored in `%APPDATA%\magicq-companion\config.toml` so the
-install location can stay read-only.
-
-### MSI installer
-
-The GitHub Action (below) builds an MSI with WiX after the PyInstaller
-step. Locally (Windows, with [WiX](https://wixtoolset.org/) installed):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
-wix build packaging\Product.wxs -d PayloadDir=$PWD\dist\MagicQCompanion -o dist\MagicQCompanion.msi
-```
-
-### Setup.exe (Inno Setup, optional)
-
-If you prefer a classic wizard installer instead of MSI:
-
-1. Build with `packaging\build_windows.ps1`
-2. Install [Inno Setup 6](https://jrsoftware.org/isinfo.php)
-3. Compile `packaging\installer.iss` → `dist\MagicQCompanion-Setup.exe`
-
-### GitHub Actions
-
-Push a tag (`v0.1.0`) or run **Build Windows** from the Actions tab. It
-uploads:
-
-- `MagicQCompanion-windows.zip` (portable)
-- `MagicQCompanion.msi` (installer)
-
-Windows Defender may warn on unsigned builds the first time — that is
-normal for unsigned open-source exes; use “More info → Run anyway”, or
-code-sign the binary for club/production machines.
-
-## Docker
-
-For deployment on a dedicated machine:
-
-```bash
-docker compose up -d --build
-```
-
-This runs the bridge with the web dashboard at `http://<host>:8765`.
-The compose file uses:
-
-- `network_mode: host` — so Art-Net UDP (including broadcast) reaches the
-  lighting network directly and the dashboard port is exposed as-is
-- `devices: /dev/snd` — passes the sound card (e.g. the Scarlett) into
-  the container; audio is captured via ALSA inside the container
-- a read-only mount of `config.toml` — edit it on the host and
-  `docker compose restart` to apply
-
-Note: on a desktop host where PipeWire/PulseAudio owns the sound card,
-the container's direct ALSA access can conflict with the desktop using
-the same device. On a dedicated/headless box (the intended deployment)
-this is not an issue. Device names inside the container are ALSA names —
-`device = "Scarlett"` still matches.
-
-To watch logs or the console output: `docker compose logs -f`.
-
-## Web dashboard
-
-`--ui` serves a live dashboard (default port 8765, change with
-`--ui-port`). It shows the current section, BPM with a beat indicator,
-a 60-second energy timeline colored by detected section, and
-build/music/divider/ramp meters in one live panel, plus the outgoing DMX
-channel values and a log of section transitions. It is reachable from other machines on the network too
-(e.g. a tablet at FOH: `http://<pc-ip>:8765`).
-
-The **Settings** panel at the top lets you pick the audio input device,
-Art-Net target IP, and universe while the bridge is running. Apply writes
-the values back to `config.toml`. Changing the input device restarts
-capture; changing Art-Net swaps the sender without interrupting analysis.
-
-## MagicQ setup
-
-1. **Setup → View DMX I/O**: on a spare universe row set **Input** to
-   `Art-Net` and **In Uni** to the universe from `config.toml` (default 0).
-2. Map the input channels to playbacks. Two common approaches:
-   - **Setup → View Settings → Playback**: set *Playbacks DMX trigger* so
-     DMX input channels control playback faders PB1-PB10 directly. Then
-     channel 1 = PB1 (groove look), channel 2 = PB2 (breakdown look),
-     channel 3 = PB3 (build look), channel 4 = PB4 (drop look),
-     channel 5 = PB5 (a fader you program as "build intensity").
-   - Or use **automations** (Macro window) triggered on DMX input levels
-     for more complex actions (page changes, macros, etc.).
-3. Program the four looks as playbacks. Suggested feel:
-   - **Groove**: beat-synced chases, medium intensity
-   - **Breakdown**: slow airy colors, no beat chases
-   - **Build-up**: accelerating movement; let PB5 (build_progress) drive
-     an intensity/speed master so the ramp is music-timed
-   - **Drop**: full send - strobes, blinders, open white
-4. Keep a manual override playback above the automated ones so a human can
-   always take over.
-
-Note: on MagicQ **PC/Mac**, DMX-input control of playbacks requires an
-unlocked system (a ChamSys USB interface/wing connected, or network
-universes unicast to a GeNetix/SnakeSys node). MagicQ consoles support it
-natively. See the ChamSys manual, "PB1 to PB10 controlled by DMX input".
-
-## Tuning
-
-All detection thresholds live in `config.toml` with comments. The ones you
-are most likely to touch:
-
-- `drop_hold_seconds` — how long the drop look stays before returning to
-  groove
-- `evidence_seconds` / `min_dwell_seconds` — higher = more stable, slower
-  to react; lower = snappier, more prone to flicker
-- `[build_score]` weights — how much rising loudness vs. rising hi-hats
-  vs. onset density count toward "this is a build-up"
-
-Run with `--dry-run` in the booth during a real set and watch the console
-output before connecting it to the rig.
-
-## How it works
-
-- `features.py` — FFT per 12 ms hop: kick-band and treble-band energy,
-  spectral flux onsets, BPM from kick intervals, and 8-second trend slopes,
-  all normalized against slow rolling baselines so it adapts to gain changes.
-- `state_machine.py` — hysteresis state machine over those features;
-  a drop requires the bass to slam back after silence, or a sudden
-  loudness jump during a build.
-- `artnet.py` — minimal ArtDMX sender (no dependencies).
-- `simulate.py` — synthetic techno track (128 BPM, scripted sections) for
-  end-to-end testing without audio hardware.

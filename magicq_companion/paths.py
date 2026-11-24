@@ -1,4 +1,4 @@
-"""Resolve resource and config paths for source runs and frozen Windows builds."""
+"""Resolve resource, model, and config paths for source runs and frozen builds."""
 
 from __future__ import annotations
 
@@ -19,6 +19,13 @@ def bundle_dir() -> Path:
     return Path(__file__).parent
 
 
+def repo_dir() -> Path:
+    """Repository root when running from source, or install dir when frozen."""
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
 def install_dir() -> Path:
     """Directory containing the executable (or project cwd when developing)."""
     if is_frozen():
@@ -28,6 +35,31 @@ def install_dir() -> Path:
 
 def static_dir() -> Path:
     return bundle_dir() / "static"
+
+
+def models_dir() -> Path:
+    """Directory holding offline ONNX genre models."""
+    for candidate in (
+        install_dir() / "models",
+        repo_dir() / "models",
+        bundle_dir() / "models",
+    ):
+        if candidate.is_dir():
+            return candidate
+    return repo_dir() / "models"
+
+
+def default_model_path(filename: str = "discogs-effnet-bsdynamic-1.onnx") -> Path:
+    """Resolve the default offline ONNX model file."""
+    for directory in (
+        install_dir() / "models",
+        repo_dir() / "models",
+        bundle_dir() / "models",
+    ):
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+    return models_dir() / filename
 
 
 def default_config_path() -> Path:
@@ -61,23 +93,11 @@ def data_dir(config_path: str | Path | None = None) -> Path:
     return install_dir()
 
 
-def fx_library_path(config_path: str | Path | None = None) -> Path:
-    return data_dir(config_path) / "fx_library.json"
-
-
-def fx_palette_path(config_path: str | Path | None = None) -> Path:
-    return data_dir(config_path) / "fx_palettes.json"
-
-
-def fx_patch_path(config_path: str | Path | None = None) -> Path:
-    """Imported fixture patch CSV (persisted as JSON) next to the FX library."""
-    return data_dir(config_path) / "fx_patch.json"
-
-
 def default_layout_path(config_path: str | Path | None = None) -> Path:
     """Writable UI layout JSON, kept next to config.toml when possible."""
-    if config_path is not None:
-        return Path(config_path).resolve().parent / "ui_layout.json"
-    if is_frozen():
-        return default_config_path().parent / "ui_layout.json"
-    return install_dir() / "ui_layout.json"
+    return data_dir(config_path) / "ui_layout.json"
+
+
+def default_genre_profiles_path(config_path: str | Path | None = None) -> Path:
+    """Writable learned per-genre profiles JSON, kept next to config.toml."""
+    return data_dir(config_path) / "genre_profiles.json"

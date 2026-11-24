@@ -75,6 +75,22 @@ def reboot_cron_spec(server: ServerConfig) -> str | None:
     return f"{int(minute)} {int(hour)} * * {dow}"
 
 
+def _systemd_venue_service_enabled() -> bool:
+    env = dict(os.environ)
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    try:
+        res = subprocess.run(
+            ["systemctl", "--user", "is-enabled", "magicq-venue.service"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return res.returncode == 0
+    except OSError:
+        return False
+
+
 def apply_host_schedule(server: ServerConfig, *, root: Path | None = None) -> str:
     """Rewrite companion crontab lines from [server] settings. Never reboots now."""
     root = Path(root) if root else repo_root()
@@ -85,8 +101,11 @@ def apply_host_schedule(server: ServerConfig, *, root: Path | None = None) -> st
     notes: list[str] = []
 
     user_lines = _strip_markers(_read_crontab(as_root=False), REBOOT_MARKERS + (BOOT_MARKER,))
-    user_lines.append(boot_entry)
-    notes.append(f"boot start → {start}")
+    if _systemd_venue_service_enabled():
+        notes.append("boot start → systemd (magicq-venue.service)")
+    else:
+        user_lines.append(boot_entry)
+        notes.append(f"boot start → {start}")
 
     root_ok = _can_sudo()
     if spec:

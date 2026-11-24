@@ -78,10 +78,13 @@ class Bridge:
         self.features = Features()
         self.enabled = True
         self.analyzing = True
-        self.signal_live = True
+        self.signal_live = False
         self.quiet_s = 0.0
+        self.below_floor_s = 0.0
+        self._hum_quiet_s = 0.0
+        self._above_floor_s = 0.0
         self._music_s = 0.0
-        self._was_sending = True
+        self._was_sending = False
         self._frame_idx = 0
 
     def active_policy(self) -> GenrePolicy | None:
@@ -125,12 +128,13 @@ class Bridge:
                     onset_density=self.features.onset_density,
                 )
                 self._update_signal_gate(self.features)
-                self.tracker.update(
-                    self.features,
-                    self.dt,
-                    genre=self.genre,
-                    policy=policy_for_hop,
-                )
+                if self.signal_live:
+                    self.tracker.update(
+                        self.features,
+                        self.dt,
+                        genre=self.genre,
+                        policy=policy_for_hop,
+                    )
                 if self.enabled and self.signal_live:
                     build_frame(
                         self.dmx,
@@ -275,28 +279,58 @@ class Bridge:
         if not bool(getattr(det, "silence_gate", True)):
             self.signal_live = True
             self.quiet_s = 0.0
+            self.below_floor_s = 0.0
+            self._above_floor_s = 0.0
             self._music_s = 0.0
             return
-        if self.t < 20.0:
-            self.signal_live = True
-            return
-        timeout = max(30.0, float(getattr(det, "silence_timeout_seconds", 600.0)))
+
+        above = bool(getattr(features, "above_floor", False))
         music = float(getattr(features, "music_score", 0.0))
-        if music < 0.28:
+        timeout = max(30.0, float(getattr(det, "silence_timeout_seconds", 600.0)))
+
+        if not above:
+            self.below_floor_s += self.dt
             self.quiet_s += self.dt
+            self._hum_quiet_s = 0.0
+            self._above_floor_s = 0.0
+            self._music_s = 0.0
+            # Turn off groove/build/DMX after 2.0 s below noise floor (longer than
+            # a brief pre-drop stop gap, fast enough that pausing playback clears DMX).
+            if self.signal_live and self.below_floor_s >= 2.0:
+                self.signal_live = False
+                self.tracker.reset_on_silence()
+            return
+
+        self._above_floor_s += self.dt
+        self.below_floor_s = 0.0
+
+        if music < 0.25:
+            self._hum_quiet_s += self.dt
+            self.quiet_s = self._hum_quiet_s
             self._music_s = 0.0
         else:
-            self.quiet_s = max(0.0, self.quiet_s - 2.0 * self.dt)
-            if music > 0.42:
+            self._hum_quiet_s = max(0.0, self._hum_quiet_s - 2.0 * self.dt)
+            self.quiet_s = self._hum_quiet_s
+            if music > 0.38:
                 self._music_s += self.dt
             else:
                 self._music_s = 0.0
+
         if self.signal_live:
-            if self.quiet_s >= timeout:
+            if self._hum_quiet_s >= timeout:
                 self.signal_live = False
-        elif self._music_s >= 1.5:
-            self.signal_live = True
-            self.quiet_s = 0.0
+                self.tracker.reset_on_silence()
+        else:
+            # Wake up immediately (~80 ms) when audio rises above floor after a
+            # silence pause (even hours long); require structured music only if
+            # waking from a prolonged non-musical hum timeout.
+            if self._hum_quiet_s < timeout and self._above_floor_s >= 0.08:
+                self.signal_live = True
+                self.quiet_s = 0.0
+            elif self._music_s >= 1.2:
+                self.signal_live = True
+                self._hum_quiet_s = 0.0
+                self.quiet_s = 0.0
 
 
 def _close_blocks(blocks: Iterator[np.ndarray]) -> None:

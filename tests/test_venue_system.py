@@ -317,6 +317,57 @@ intensity = 0.42
             self.assertIn("config.toml", names)
             self.assertFalse(any("__pycache__" in n or n.endswith(".pyc") for n in names))
 
+    def test_no_audio_clears_groove_and_buildup_and_wakes_fast(self) -> None:
+        cfg = Config()
+        sr, hop = cfg.audio.samplerate, cfg.audio.blocksize
+        rng = np.random.default_rng(7)
+        snapshots: dict[str, tuple[bool, float, list[int]]] = {}
+
+        def stream():
+            # 1. Boot in silence (-75 dBFS hiss below -55 dBFS floor) -> DMX must stay 0.
+            for _ in range(int(3.0 * sr / hop)):
+                yield 1e-4 * rng.standard_normal(hop)
+            # 2. Play 15s of music -> DMX wakes up with groove active.
+            for i in range(int(15.0 * sr / hop)):
+                t = np.arange(hop) / sr + i * hop / sr
+                p = t % (60.0 / 128.0)
+                yield 0.5 * np.sin(2 * np.pi * 55.0 * t) * np.exp(-p / 0.06) * (p < 0.2)
+            # 3. Stop audio into hiss for 12s -> after 2s, groove & buildup MUST be 0.
+            for _ in range(int(12.0 * sr / hop)):
+                yield 1e-4 * rng.standard_normal(hop)
+            # 4. Resume music -> wakes back up within 0.2s.
+            for i in range(int(2.0 * sr / hop)):
+                t = np.arange(hop) / sr + i * hop / sr
+                p = t % (60.0 / 128.0)
+                yield 0.5 * np.sin(2 * np.pi * 55.0 * t) * np.exp(-p / 0.06) * (p < 0.2)
+
+        bridge = Bridge(cfg, stream(), pace=False, async_genre=False)
+
+        def on_frame(b: Bridge) -> None:
+            if "boot" not in snapshots and b.t >= 2.0:
+                snapshots["boot"] = (b.signal_live, b.features.build_score, list(b.dmx[:10]))
+            elif "playing" not in snapshots and b.t >= 8.0:
+                snapshots["playing"] = (b.signal_live, b.features.build_score, list(b.dmx[:10]))
+            elif "stopped" not in snapshots and b.t >= 24.0:
+                snapshots["stopped"] = (b.signal_live, b.features.build_score, list(b.dmx[:10]))
+            elif "resumed" not in snapshots and b.t >= 31.0:
+                snapshots["resumed"] = (b.signal_live, b.features.build_score, list(b.dmx[:10]))
+
+        bridge.run(on_frame=on_frame)
+
+        self.assertFalse(snapshots["boot"][0])
+        self.assertEqual(snapshots["boot"][2], [0] * 10)
+
+        self.assertTrue(snapshots["playing"][0])
+        self.assertEqual(snapshots["playing"][2][0], 255)
+
+        self.assertFalse(snapshots["stopped"][0])
+        self.assertEqual(snapshots["stopped"][1], 0.0)
+        self.assertEqual(snapshots["stopped"][2], [0] * 10)
+
+        self.assertTrue(snapshots["resumed"][0])
+        self.assertEqual(snapshots["resumed"][2][0], 255)
+
 
 if __name__ == "__main__":
     unittest.main()

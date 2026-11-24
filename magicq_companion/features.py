@@ -170,9 +170,11 @@ class FeatureExtractor:
         self._mid_bins = (freqs >= 250) & (freqs <= 2000)
         self._treble_bins = (freqs >= 2000) & (freqs <= 8000)
 
-        # Slow baselines (EMA). Warm up fast for the first seconds.
+        # Slow baselines (EMA). Warm up fast on real musical frames only.
         self._alpha_slow = 1.0 / (detection.baseline_seconds * self.fps)
         self._frames_seen = 0
+        self._music_frames_seen = 0
+        self._below_floor_s = 0.0
         self._bass_base = 0.0
         self._mid_base = 0.0
         self._treble_base = 0.0
@@ -326,30 +328,51 @@ class FeatureExtractor:
             self._flux_ac_hist.append(self._flux_ac_accum / self._ac_every)
             self._flux_ac_accum = 0.0
 
-        # Baselines: fast warmup, then slow adaptation.
-        alpha = max(self._alpha_slow, 1.0 / max(self._frames_seen, 1))
-        self._bass_base = _asymmetric_base(
-            self._bass_base, bass, alpha, hold_high=True
-        )
-        self._rms_base += alpha * (rms - self._rms_base)
-        self._mid_base = _asymmetric_base(self._mid_base, mid, alpha)
-        self._treble_base = _asymmetric_base(self._treble_base, treble, alpha)
         bass_e = float(np.sum(mag[self._bass_bins]))
         mid_e = float(np.sum(mag[self._mid_bins]))
         treble_e = float(np.sum(mag[self._treble_bins]))
-        self._bass_energy_base += alpha * (bass_e - self._bass_energy_base)
-        tilt = (mid_e + treble_e) / (max(bass_e, self._bass_energy_base) + _EPS)
-        self._tilt_base = _asymmetric_base(self._tilt_base, tilt, alpha)
 
-        bass_norm = bass / (self._bass_base + _EPS)
-        mid_norm = mid / (self._mid_base + _EPS)
-        treble_norm = treble / (self._treble_base + _EPS)
-        energy_norm = rms / (self._rms_base + _EPS)
+        # Only adapt baselines on real signal above the noise floor so hiss/silence
+        # never drags baselines down or fabricates phantom build slopes.
+        if above_floor:
+            self._below_floor_s = 0.0
+            self._music_frames_seen += 1
+            alpha = max(self._alpha_slow, 1.0 / max(self._music_frames_seen, 1))
+            self._bass_base = _asymmetric_base(
+                self._bass_base, bass, alpha, hold_high=True
+            )
+            self._rms_base += alpha * (rms - self._rms_base)
+            self._mid_base = _asymmetric_base(self._mid_base, mid, alpha)
+            self._treble_base = _asymmetric_base(self._treble_base, treble, alpha)
+            self._bass_energy_base += alpha * (bass_e - self._bass_energy_base)
+            tilt = (mid_e + treble_e) / (max(bass_e, self._bass_energy_base) + _EPS)
+            self._tilt_base = _asymmetric_base(self._tilt_base, tilt, alpha)
 
-        onset = self._detect_onset(flux)
+            bass_norm = bass / (self._bass_base + _EPS)
+            mid_norm = mid / (self._mid_base + _EPS)
+            treble_norm = treble / (self._treble_base + _EPS)
+            energy_norm = rms / (self._rms_base + _EPS)
+        else:
+            self._below_floor_s += self.dt
+            tilt = 0.0
+            bass_norm = 0.0
+            mid_norm = 0.0
+            treble_norm = 0.0
+            energy_norm = 0.0
+            if self._below_floor_s >= 1.5:
+                self._beat_pulse_on = False
+            if self._below_floor_s >= 2.5:
+                self._beat_intervals.clear()
+                self._tempo_candidates.clear()
+                self._resolved_bpm = 0.0
+
+        onset = self._detect_onset(flux) if above_floor else False
+        if not above_floor and self._below_floor_s >= 2.0:
+            self._flux_hist.clear()
+            self._onset_times.clear()
         if onset:
             self._onset_times.append(self._t)
-        onset_density = self._onset_density()
+        onset_density = self._onset_density() if above_floor else 0.0
 
         beat = self._detect_beat(bass, above_floor)
         if beat:
@@ -362,10 +385,14 @@ class FeatureExtractor:
         )
 
         build_score = self._update_trends_and_build_score(
-            energy_norm, treble_norm, onset_density, flux, bass_norm
+            energy_norm, treble_norm, onset_density, flux, bass_norm, above_floor=above_floor
         )
-        melody_score = self._melody_score(
-            bass_norm, mid_norm, treble_norm, tilt, build_score, onset_density
+        melody_score = (
+            self._melody_score(
+                bass_norm, mid_norm, treble_norm, tilt, build_score, onset_density
+            )
+            if above_floor
+            else 0.0
         )
         music_score = self._update_music_score(level, mag, kick_depth)
         pace_score = self._update_pace_score(
@@ -1140,9 +1167,25 @@ class FeatureExtractor:
         onset_density: float,
         flux: float,
         bass_norm: float,
+        *,
+        above_floor: bool = True,
     ) -> float:
         """Composite build tension from slopes, level lifts, and filter opens."""
-        alpha_flux = max(self._alpha_slow, 1.0 / max(self._frames_seen, 1))
+        if not above_floor:
+            decay = float(np.exp(-self.dt / 0.5))
+            self._build_score = self._build_score * decay
+            if self._build_score < 0.01:
+                self._build_score = 0.0
+            if self._below_floor_s >= 2.0:
+                self._rms_trend.clear()
+                self._treble_trend.clear()
+                self._onset_trend.clear()
+                self._bass_trend.clear()
+                self._flux_trend.clear()
+                self._build_score = 0.0
+            return self._build_score
+
+        alpha_flux = max(self._alpha_slow, 1.0 / max(self._music_frames_seen, 1))
         self._flux_base += alpha_flux * (flux - self._flux_base)
 
         if self._frames_seen % self._trend_every:

@@ -1020,11 +1020,13 @@ function update(s) {
     $("glow").style.setProperty("--glow-color", COLORS.off);
     $("sectionSub").textContent = "Analyzer off — server/UI still running";
   } else if (gated) {
-    $("section").textContent = "NO MUSIC";
+    $("section").textContent = "NO AUDIO";
     $("section").style.color = COLORS.off;
     $("glow").style.setProperty("--glow-color", COLORS.off);
     const quiet = Math.floor(s.quiet_s || 0);
-    $("sectionSub").textContent = `Output paused — no music for ${Math.floor(quiet / 60)}:${String(quiet % 60).padStart(2, "0")}`;
+    $("sectionSub").textContent = quiet > 0
+      ? `Idle (DMX off) — silent for ${Math.floor(quiet / 60)}:${String(quiet % 60).padStart(2, "0")}`
+      : "Idle (DMX off) — waiting for audio above noise floor";
   } else if (!outputEnabled) {
     $("section").textContent = "OFF";
     $("section").style.color = COLORS.off;

@@ -181,6 +181,19 @@ class SectionTracker:
             return max(0.05, rise * (1.20 - 0.40 * self.drop_intensity))
         return max(0.05, rise * self._param("drop_rise_mul", 1.0))
 
+    def reset_on_silence(self) -> None:
+        """Clear active section/ramp state once audio has been absent."""
+        self.state = Section.GROOVE
+        self.t_in_state = 0.0
+        self.build_progress = 0.0
+        self._ev_breakdown = 0.0
+        self._ev_build = 0.0
+        self._ev_groove = 0.0
+        self._ev_fizzle = 0.0
+        self._heard_kick = False
+        self._kick_gone_s = 0.0
+        self._breakdown_cue = False
+
     def evidence(self) -> dict:
         g = self._genre
         return {
@@ -242,11 +255,14 @@ class SectionTracker:
             and f.onset_density >= 2.0
         )
         kick_present = (
-            f.bass_norm > cfg.kick_present_above
-            or f.kick_depth > 0.35
-            or sync_groove_alive
+            f.above_floor
+            and (
+                f.bass_norm > cfg.kick_present_above
+                or f.kick_depth > 0.35
+                or sync_groove_alive
+            )
         )
-        building = f.build_score > self._build_threshold()
+        building = f.above_floor and (f.build_score > self._build_threshold())
 
         self._ev_breakdown = _accumulate(self._ev_breakdown, self._breakdown_cue, dt)
         self._ev_build = _accumulate(self._ev_build, building, dt)

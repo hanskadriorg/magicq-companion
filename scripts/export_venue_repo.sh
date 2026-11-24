@@ -13,6 +13,10 @@ fi
 mkdir -p "$DEST"
 git -C "$SRC" archive HEAD | tar -x -C "$DEST"
 git -C "$DEST" init -b main
+USER_NAME="$(git -C "$SRC" config user.name || echo "MagicQ Venue")"
+USER_EMAIL="$(git -C "$SRC" config user.email || echo "venue@localhost")"
+git -C "$DEST" config user.name "$USER_NAME"
+git -C "$DEST" config user.email "$USER_EMAIL"
 git -C "$DEST" add -A
 git -C "$DEST" commit -m "Initialize MagicQ Venue Companion"
 

@@ -1,3 +1,3 @@
-"""MagicQ Companion: audio, Matter, and DMX for ChamSys MagicQ."""
+"""MagicQ Venue Companion: unattended audio & genre autopilot for ChamSys MagicQ."""
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"

@@ -1,12 +1,11 @@
 """Per-block audio feature extraction.
 
 Everything works on small hops (default 512 samples @ 44.1 kHz, ~12 ms)
-so the pipeline stays real-time. Features are normalized against slow
-rolling baselines so the system adapts when the DJ changes gain or EQ.
-
-Absolute level matters too: a signal below the configured noise floor is
-treated as no music at all rather than being normalized up into looking
-like a track.
+so the pipeline stays real-time. Features combine rolling-baseline relative
+cues (for gain-invariant section transitions) with compression-invariant
+intrinsic pace cues (transient density, hi-hat modulation, kick punch,
+genre-guided true BPM, and genre arousal) so slow tracks never trigger
+frantic chases and compressed fast club tracks never lose energy.
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from .config import (
     BuildScoreConfig,
     DetectionConfig,
 )
+from .genre_agent import GenreControlVector
 
 _EPS = 1e-9
 
@@ -50,21 +50,18 @@ _KICK_PEAK_DECAY = 1.5
 # Beat-to-beat intervals longer than this are never a quarter note.
 _KICK_MAX_INTERVAL = 2.6
 
+# True musical BPM bounds across downtempo/R&B through Drum & Bass.
+_BPM_MIN = 60.0
+_BPM_MAX = 190.0
+_AC_RATE_HZ = 20.0
+_AC_WINDOW_SECONDS = 6.0
+
 # BPM-rate DMX steps: eighth, quarter, half, full tempo.
 _BPM_RATE_LEVELS = tuple(BPM_RATE_NAME_TO_LEVEL[n] for n in BPM_RATE_NAMES)
 _BPM_RATE_NAME_TO_INDEX = {n: i for i, n in enumerate(BPM_RATE_NAMES)}
 # Snap between divider steps — MagicQ should see 32/64/128/255 only.
 _BPM_RATE_FADE_SECONDS = 0.0
-# Adaptive thresholds from a rolling energy window (seconds / sample rate).
-# 90 s is long enough to ignore a breakdown, short enough that a new
-# loud section can climb back to 1/1 without waiting out a 5-minute average.
-_BPM_RATE_HISTORY_SECONDS = 90.0
-_BPM_RATE_HISTORY_HZ = 2.0
-# Need this much history before trusting percentiles (cold-start).
-_BPM_RATE_MIN_HISTORY_SECONDS = 12.0
-# Smooth loudness over half a second so kick gaps don't yank the rate,
-# but a real energy jump still lands within a beat.
-_BPM_RATE_ENERGY_SMOOTH_SECONDS = 0.55
+_PACE_SMOOTH_SECONDS = 0.75
 
 # The dashboard only redraws ~20 times a second, so the spectrum and the
 # spectral-flatness term are recomputed at a fraction of the hop rate.
@@ -87,7 +84,6 @@ class Features:
 
     rms: float = 0.0
     peak: float = 0.0
-    # Absolute input level, for the dashboard input meter and the music gate.
     rms_db: float = -99.0
     peak_db: float = -99.0
     # 0..1: how far the input sits above the configured noise floor.
@@ -110,6 +106,8 @@ class Features:
     build_score: float = 0.0    # 0..1 composite "tension rising" score
     # 0..1: kick still present but focus has shifted to mid/high (melody/pads).
     melody_score: float = 0.0
+    # 0..1: compression-invariant intrinsic musical pace / drive.
+    pace_score: float = 0.0
     beat: bool = False          # kick detected in this frame
     # Hard 0/255 toggle on each kick — ChamSys BPM inputs dislike fades.
     beat_pulse: float = 0.0
@@ -123,11 +121,14 @@ class Features:
     four_four_locked: bool = False
     # 0..3 — which quarter of the bar the grid thinks we're on.
     beat_in_bar: int = 0
-    # Chase-rate hint: fades between 32/64/128/255 (1/8 … full BPM) by energy.
+    # Chase-rate DMX value: snaps between 32/64/128/255 (1/8 … full BPM).
     bpm_rate: float = 32.0
+    # Live Genre Agent telemetry attached for dashboard & logging.
+    archetype: str = "house_tech"
+    archetype_label: str = "House / Tech House"
+    genre_tags_text: str = ""
+    genre_backend: str = "dsp"
     # Log-frequency band levels in dBFS, 40 Hz–8 kHz (for the dashboard).
-    # Absolute, so the visualiser can show real loudness instead of an
-    # autoranged shape.
     spectrum_db: tuple[int, ...] = field(default_factory=tuple)
 
 
@@ -170,7 +171,7 @@ class FeatureExtractor:
         self._mid_base = 0.0
         self._treble_base = 0.0
         self._rms_base = 0.0
-        self._bass_energy_base = 0.0  # sum-of-bins baseline for tilt
+        self._bass_energy_base = 0.0
         self._tilt_base = 1.0
         self._melody_smooth = 0.0
         self._tilt_smooth = 0.5
@@ -179,8 +180,15 @@ class FeatureExtractor:
         self._flatness = 1.0
         self._flatness_every = max(1, int(round(self.fps / _FLATNESS_HZ)))
 
-        # BPM-rate fader (32/64/128/255) with 0.25 s linear crossfade.
-        # Thresholds adapt to the last 5 minutes of smoothed energy.
+        # Hi-hat / high-band pulse detector (counts fast 8th/16th subdivisions).
+        self._treble_env = 0.0
+        self._prev_treble_env = 0.0
+        self._hat_diff_hist: deque[float] = deque(maxlen=max(16, int(round(self.fps * 1.2))))
+        self._last_hat_t = -10.0
+        self._hat_times: deque[float] = deque(maxlen=96)
+        self._pace_smooth = 0.35
+
+        # BPM-rate state (32/64/128/255).
         lo, hi = self._bpm_rate_bounds()
         start = max(lo, min(hi, 1))
         self._bpm_rate_index = start
@@ -188,20 +196,21 @@ class FeatureExtractor:
         self._bpm_rate_from = float(_BPM_RATE_LEVELS[start])
         self._bpm_rate_target = float(_BPM_RATE_LEVELS[start])
         self._bpm_rate_fade_t = _BPM_RATE_FADE_SECONDS
-        self._bpm_rate_energy = 1.0
         self._bpm_rate_down_timer = 0.0
-        hist_len = max(8, int(_BPM_RATE_HISTORY_SECONDS * _BPM_RATE_HISTORY_HZ))
-        self._bpm_rate_history: deque[float] = deque(maxlen=hist_len)
-        self._bpm_rate_hist_every = max(1, int(round(self.fps / _BPM_RATE_HISTORY_HZ)))
 
-        # Onset detection state.
+        # Onset detection state + 20 Hz flux envelope for tempo octave disambiguation.
         flux_window = int(self.fps * 1.0)
         self._flux_hist: deque[float] = deque(maxlen=flux_window)
         self._last_onset_t = -10.0
         self._onset_times: deque[float] = deque(maxlen=64)
+        self._ac_every = max(1, int(round(self.fps / _AC_RATE_HZ)))
+        self._flux_ac_accum = 0.0
+        self._flux_ac_hist: deque[float] = deque(
+            maxlen=int(_AC_WINDOW_SECONDS * _AC_RATE_HZ)
+        )
+        self._resolved_bpm = 0.0
 
-        # Beat (kick) detection: envelope plus the ceiling/floor pair that
-        # describes how deeply the bass band is actually modulated.
+        # Beat (kick) detection state.
         self._bass_env = 0.0
         self._bass_peak = 0.0
         self._bass_trough = 0.0
@@ -213,8 +222,8 @@ class FeatureExtractor:
         self._tempo_candidates: deque[float] = deque(maxlen=3)
 
         # 4/4 quarter-note grid (phase-locked loop steered by kicks).
-        self._grid_phase = 0.0          # 0..1 within the current quarter note
-        self._grid_bpm = 128.0
+        self._grid_phase = 0.0
+        self._grid_bpm = 124.0
         self._grid_locked = False
         self._last_four_four_t = -10.0
         self._beat_in_bar = 0
@@ -239,16 +248,28 @@ class FeatureExtractor:
         self._spec_onesided: np.ndarray | None = None
         self._spec_cache: tuple[int, ...] = ()
         self._spec_every = max(1, int(round(self.fps / _SPECTRUM_HZ)))
-        # Hann RMS so band energy matches the unwindowed input-meter dBFS.
         self._win_rms = float(np.sqrt(np.mean(self._window**2))) or 1.0
         self.visualizer = True
+        self._last_genre: GenreControlVector | None = None
 
     # ------------------------------------------------------------------
 
-    def process(self, block: np.ndarray) -> Features:
+    def process(
+        self,
+        block: np.ndarray,
+        *,
+        genre: GenreControlVector | None = None,
+        section: str = "groove",
+    ) -> Features:
         """Consume one hop of mono samples and return the current features."""
         self._t += self.dt
         self._frames_seen += 1
+        self._last_genre = genre
+
+        # Treat non-finite startup blocks from PipeWire/USB devices as silence
+        # so a single bad frame never poisons rolling FFT/EMA state.
+        if not np.isfinite(block).all():
+            block = np.nan_to_num(block, nan=0.0, posinf=0.0, neginf=0.0)
 
         self._buffer = np.roll(self._buffer, -len(block))
         self._buffer[-len(block):] = block
@@ -267,27 +288,41 @@ class FeatureExtractor:
         mid = float(np.mean(mag[self._mid_bins]))
         treble = float(np.mean(mag[self._treble_bins]))
 
+        self._prev_treble_env = self._treble_env
+        self._treble_env += 0.55 * (treble - self._treble_env)
+        hat_rise = max(0.0, self._treble_env - self._prev_treble_env)
+        if above_floor:
+            if len(self._hat_diff_hist) >= 16:
+                h_mean = float(np.mean(self._hat_diff_hist))
+                h_peak = float(np.max(self._hat_diff_hist))
+                h_thr = max(h_mean * 2.2, h_peak * 0.28, 1e-5)
+                if hat_rise > h_thr and (self._t - self._last_hat_t) >= 0.055:
+                    self._hat_times.append(self._t)
+                    self._last_hat_t = self._t
+            self._hat_diff_hist.append(hat_rise)
+        else:
+            self._hat_diff_hist.clear()
+            self._hat_times.clear()
+
         if self._prev_mag is None:
             flux = 0.0
         else:
             flux = float(np.sum(np.clip(mag - self._prev_mag, 0.0, None)))
         self._prev_mag = mag
 
+        self._flux_ac_accum += flux
+        if self._frames_seen % self._ac_every == 0:
+            self._flux_ac_hist.append(self._flux_ac_accum / self._ac_every)
+            self._flux_ac_accum = 0.0
+
         # Baselines: fast warmup, then slow adaptation.
         alpha = max(self._alpha_slow, 1.0 / max(self._frames_seen, 1))
-        # Hold the bass average up when the kick drops out so bass_norm
-        # (and kick-absent) stay visible instead of the baseline chasing down.
         self._bass_base = _asymmetric_base(
             self._bass_base, bass, alpha, hold_high=True
         )
         self._rms_base += alpha * (rms - self._rms_base)
-        # Mid/treble/tilt baselines lag on the way up so a sustained melodic
-        # stretch keeps scoring instead of the baseline "catching" it.
         self._mid_base = _asymmetric_base(self._mid_base, mid, alpha)
         self._treble_base = _asymmetric_base(self._treble_base, treble, alpha)
-        # Band *sums* for tilt (means under-weight wide mid/treble bands).
-        # Floor the denominator on a slow bass-energy baseline so the ratio
-        # doesn't explode between kicks.
         bass_e = float(np.sum(mag[self._bass_bins]))
         mid_e = float(np.sum(mag[self._mid_bins]))
         treble_e = float(np.sum(mag[self._treble_bins]))
@@ -308,8 +343,9 @@ class FeatureExtractor:
         beat = self._detect_beat(bass, above_floor)
         if beat:
             self._beat_pulse_on = not self._beat_pulse_on
-        bpm = self._estimate_bpm()
+        bpm = self._estimate_bpm(genre)
         kick_depth = self._update_kick_depth(above_floor)
+        kick_reg = self._kick_regularity()
         four_four_beat = self._update_four_four_grid(
             beat, bpm, above_floor, kick_depth
         )
@@ -321,8 +357,33 @@ class FeatureExtractor:
             bass_norm, mid_norm, treble_norm, tilt, build_score, onset_density
         )
         music_score = self._update_music_score(level, mag, kick_depth)
-        bpm_rate = self._update_bpm_rate(energy_norm)
+        pace_score = self._update_pace_score(
+            above_floor=above_floor,
+            energy_norm=energy_norm,
+            onset_density=onset_density,
+            kick_depth=kick_depth,
+            kick_regularity=kick_reg,
+            bpm=bpm,
+            bass_e=bass_e,
+            mid_e=mid_e,
+            treble_e=treble_e,
+            genre=genre,
+        )
+        bpm_rate = self._update_bpm_rate(
+            pace_score=pace_score,
+            above_floor=above_floor,
+            kick_depth=kick_depth,
+            bass_norm=bass_norm,
+            build_score=build_score,
+            genre=genre,
+            section=section,
+        )
         spectrum_db = self._spectrum_db(mag) if self.visualizer else ()
+
+        arch = genre.archetype if genre is not None else "house_tech"
+        arch_label = genre.archetype_label if genre is not None else "House / Tech House"
+        tags_text = genre.formatted_tags() if genre is not None else ""
+        backend = genre.backend if genre is not None else "dsp"
 
         return Features(
             rms=rms,
@@ -340,10 +401,11 @@ class FeatureExtractor:
             bass_norm=bass_norm,
             energy_norm=energy_norm,
             kick_depth=kick_depth,
-            kick_regularity=self._kick_regularity(),
+            kick_regularity=kick_reg,
             music_score=music_score,
             build_score=build_score,
             melody_score=melody_score,
+            pace_score=pace_score,
             beat=beat,
             beat_pulse=255.0 if self._beat_pulse_on else 0.0,
             bpm=bpm,
@@ -354,16 +416,15 @@ class FeatureExtractor:
             four_four_locked=self._grid_locked,
             beat_in_bar=self._beat_in_bar,
             bpm_rate=bpm_rate,
+            archetype=arch,
+            archetype_label=arch_label,
+            genre_tags_text=tags_text,
+            genre_backend=backend,
             spectrum_db=spectrum_db,
         )
 
     def _spectrum_db(self, mag: np.ndarray) -> tuple[int, ...]:
-        """Per-band RMS in dBFS, same scale as the input meter.
-
-        ``mag`` is |rFFT| / N. Summing one-sided power (Parseval) gives the
-        RMS that band contributes; averaging bin magnitudes under-reads
-        music by tens of dB and made the visualizer look empty.
-        """
+        """Per-band RMS in dBFS, same scale as the input meter."""
         if self._frames_seen % self._spec_every and self._spec_cache:
             return self._spec_cache
         if self._spec_bins is None:
@@ -384,6 +445,7 @@ class FeatureExtractor:
         )
         band_rms = np.sqrt(np.maximum(power, 0.0)) / self._win_rms
         db = 20.0 * np.log10(np.maximum(band_rms, 1.1e-5))
+        db = np.nan_to_num(db, nan=-99.0, posinf=6.0, neginf=-99.0)
         self._spec_cache = tuple(int(round(x)) for x in np.clip(db, -99.0, 6.0))
         return self._spec_cache
 
@@ -407,16 +469,13 @@ class FeatureExtractor:
         count = sum(1 for t in self._onset_times if self._t - t <= window)
         return count / window
 
-    def _detect_beat(self, bass: float, above_floor: bool) -> bool:
-        """Kick detection from the depth of the bass-band modulation.
+    def _hat_density(self) -> float:
+        window = 3.0
+        count = sum(1 for t in self._hat_times if self._t - t <= window)
+        return count / window
 
-        A floor/ceiling pair brackets the bass envelope over the last few
-        seconds. A kick is the envelope crossing 55% of that range, released
-        again below 30% (Schmitt trigger). Because the trigger points are
-        derived from the range rather than from the average, a shallow but
-        real pulse on a compressed feed still fires, while a flat band —
-        hiss, a sub drone, or digital silence — produces nothing at all.
-        """
+    def _detect_beat(self, bass: float, above_floor: bool) -> bool:
+        """Kick detection from the depth of the bass-band modulation."""
         self._bass_env += 0.35 * (bass - self._bass_env)
         env = self._bass_env
         if not above_floor:
@@ -452,14 +511,7 @@ class FeatureExtractor:
         return beat
 
     def _register_interval(self, interval: float) -> None:
-        """Fold one kick interval into the tempo history.
-
-        Missed kicks arrive as near-multiples of the beat and are divided
-        back down; extra hits between kicks are discarded. An interval that
-        fits neither, but which repeats consistently, is a real tempo change
-        and replaces the history outright — that is what lets the BPM climb
-        again instead of only ever drifting down.
-        """
+        """Fold one kick interval into the tempo history."""
         if interval <= 0.0 or interval > _KICK_MAX_INTERVAL:
             return
         hist = self._beat_intervals
@@ -477,7 +529,7 @@ class FeatureExtractor:
                 return
 
         if interval < 0.62 * reference:
-            return  # a bassline note or ghost hit between kicks
+            return
 
         candidates = self._tempo_candidates
         if candidates and abs(interval - candidates[-1]) > 0.10 * candidates[-1]:
@@ -488,31 +540,110 @@ class FeatureExtractor:
             hist.extend(candidates)
             candidates.clear()
 
-    def _estimate_bpm(self) -> float:
+    def _estimate_bpm(self, genre: GenreControlVector | None = None) -> float:
+        """Estimate true BPM in 60..190 using kick intervals + genre/onset octave check."""
         if len(self._beat_intervals) < 2:
             return 0.0
         interval = float(np.median(self._beat_intervals))
         if interval <= 0:
             return 0.0
-        bpm = 60.0 / interval
-        # Fold octave errors into the club-typical range.
-        while bpm < 90 and bpm > 0:
-            bpm *= 2
-        while bpm > 180:
-            bpm /= 2
-        return bpm
+        raw_bpm = 60.0 / interval
+        genre_vec = genre if genre is not None else self._last_genre
+
+        # Bring extreme values into the coarse musical window first.
+        base = raw_bpm
+        while base < _BPM_MIN and base > 0:
+            base *= 2.0
+        while base > _BPM_MAX:
+            base /= 2.0
+
+        candidates: list[tuple[float, float]] = []
+        for mul in (0.5, 1.0, 2.0):
+            cand = base * mul
+            if _BPM_MIN <= cand <= _BPM_MAX:
+                candidates.append((cand, mul))
+        if not candidates:
+            return base
+
+        onset_rate = self._onset_density()
+        hat_rate = self._hat_density()
+        best_bpm = base
+        best_score = -1e9
+        for cand, mul in candidates:
+            score = 0.0
+            # Strong preference for the directly measured kick interval unless
+            # genre + rhythmic subdivision evidence strongly disagrees.
+            if abs(cand - raw_bpm) <= 0.5:
+                score += 0.40
+            elif mul == 1.0:
+                score += 0.24
+
+            score += 0.28 * self._flux_autocorr_support(cand)
+
+            # Fast breakbeat/DnB 2-step kicks measure ~85-92 BPM in the sub band
+            # while hats/snares rattle at >= 5 Hz (160-180 BPM subdivisions).
+            if cand >= 152.0 and 76.0 <= raw_bpm <= 96.0 and hat_rate >= 5.0:
+                score += 0.36
+            elif cand > 152.0 and hat_rate < 4.0 and raw_bpm < 96.0:
+                score -= 0.40
+
+            if genre_vec is not None and genre_vec.backend != "off":
+                lo = genre_vec.natural_bpm_lo
+                hi = genre_vec.natural_bpm_hi
+                if lo <= cand <= hi:
+                    prior = 1.0
+                elif cand < lo:
+                    prior = float(np.exp(-((lo - cand) / 18.0) ** 2))
+                else:
+                    prior = float(np.exp(-((cand - hi) / 20.0) ** 2))
+                weight = 0.38 if genre_vec.backend in ("onnx", "manual") else 0.28
+                score += weight * prior
+            elif 70.0 <= cand <= 155.0:
+                score += 0.12
+
+            # Continuity hysteresis prevents flipping octaves mid-phrase.
+            if self._resolved_bpm > 0 and abs(cand - self._resolved_bpm) <= 0.08 * self._resolved_bpm:
+                score += 0.06
+
+            if score > best_score:
+                best_score = score
+                best_bpm = cand
+
+        self._resolved_bpm = best_bpm
+        return best_bpm
+
+    def _flux_autocorr_support(self, bpm: float) -> float:
+        """Normalized autocorrelation support at beat period (and half-beat) in flux."""
+        if len(self._flux_ac_hist) < int(2.5 * _AC_RATE_HZ) or bpm <= 0:
+            return 0.0
+        arr = np.asarray(self._flux_ac_hist, dtype=np.float64)
+        centered = arr - float(np.mean(arr))
+        denom = float(np.dot(centered, centered))
+        if denom <= _EPS:
+            return 0.0
+
+        def _corr_at(period_s: float) -> float:
+            lag = int(round(period_s * _AC_RATE_HZ))
+            if lag <= 1 or lag >= len(centered) - 2:
+                return 0.0
+            vals = []
+            for d in (-1, 0, 1):
+                k = lag + d
+                if 1 <= k < len(centered):
+                    vals.append(float(np.dot(centered[:-k], centered[k:])) / denom)
+            return max(0.0, max(vals) if vals else 0.0)
+
+        beat_p = 60.0 / bpm
+        c_beat = _corr_at(beat_p)
+        c_sub = _corr_at(beat_p * 0.5)
+        return _clip01(0.70 * c_beat + 0.30 * c_sub)
 
     def _update_four_four_grid(
         self, kick: bool, bpm: float, above_floor: bool, kick_depth: float
     ) -> bool:
-        """Advance a 4/4 quarter-note grid; return True when a beat fires.
-
-        Kicks steer the phase (PLL). Channel 11 is a lock flag (255 while a
-        4/4 formation is held), not a metronome pulse.
-        """
+        """Advance a 4/4 quarter-note grid; return True when a beat fires."""
         need, miss_beats, reg_need, depth_need = self._four_four_params()
         if bpm > 0:
-            # Snap on a real tempo change, glide on small corrections.
             if abs(bpm - self._grid_bpm) > 0.08 * self._grid_bpm:
                 self._grid_bpm = bpm
             else:
@@ -543,14 +674,11 @@ class FeatureExtractor:
             if self._grid_phase >= 1.0:
                 self._grid_phase -= 1.0
                 if self._grid_locked:
-                    fired = True  # predicted beat — kick was missed/soft
+                    fired = True
 
-        # Refractory: don't double-fire when a prediction and the real kick
-        # land within ~40% of a beat of each other.
         if fired and (self._t - self._last_four_four_t) < 0.4 * period:
             fired = False
             if kick:
-                # Still resync phase to the kick, just don't pulse twice.
                 self._grid_phase = self.dt / period
 
         if fired:
@@ -579,7 +707,6 @@ class FeatureExtractor:
             if self._four_four_unlock_t < 0:
                 self._four_four_unlock_t = self._t
             self._four_four_lock_t = -1.0
-            # Drop immediately in silence; otherwise wait out the smoother.
             if (
                 not above_floor
                 or smooth <= 0
@@ -604,19 +731,13 @@ class FeatureExtractor:
         return _clip01(1.0 - float(np.std(iv) / med) / 0.35)
 
     def _update_kick_depth(self, above_floor: bool) -> float:
-        """0 = no kick right now; ~1 = kick pulsing hard in the bass band.
-
-        The modulation range alone is not enough: right after the kick stops
-        the ceiling is still high while the floor has already collapsed, which
-        reads as maximum depth exactly when a breakdown starts. So the range
-        is gated on a kick having actually landed within the last two beats.
-        """
+        """0 = no kick right now; ~1 = kick pulsing hard in the bass band."""
         if not above_floor:
             raw = 0.0
         else:
             span = max(self._bass_peak - self._bass_trough, 0.0)
             depth = _clip01(span / (self._bass_peak + _EPS) / 0.65)
-            period = 60.0 / max(self._grid_bpm, 90.0)
+            period = 60.0 / max(self._grid_bpm, 65.0)
             since = self._t - self._last_beat_t
             recent = _clip01((2.0 * period - since) / period)
             raw = depth * recent
@@ -627,12 +748,7 @@ class FeatureExtractor:
     def _update_music_score(
         self, level: float, mag: np.ndarray, kick_depth: float
     ) -> float:
-        """Structured music vs hiss / digital silence.
-
-        Level is measured against the configured noise floor, so a quiet or
-        disconnected input can never look like a track no matter how long
-        the baselines have had to adapt.
-        """
+        """Structured music vs hiss / digital silence."""
         if self._frames_seen % self._flatness_every == 0:
             pos = mag[mag > 1e-12]
             if pos.size:
@@ -663,6 +779,75 @@ class FeatureExtractor:
         self._music_smooth += alpha * (raw - self._music_smooth)
         return _clip01(self._music_smooth)
 
+    # ------------------------------------------------------------------
+    # Intrinsic Pace Score + Genre-Guided Chase Rate (bpm_rate)
+    # ------------------------------------------------------------------
+
+    def _update_pace_score(
+        self,
+        *,
+        above_floor: bool,
+        energy_norm: float,
+        onset_density: float,
+        kick_depth: float,
+        kick_regularity: float,
+        bpm: float,
+        bass_e: float,
+        mid_e: float,
+        treble_e: float,
+        genre: GenreControlVector | None,
+    ) -> float:
+        """Compute compression-invariant musical pace/drive in 0..1."""
+        if not above_floor:
+            alpha_off = 1.0 - float(np.exp(-self.dt / 0.6))
+            self._pace_smooth += alpha_off * (0.0 - self._pace_smooth)
+            return _clip01(self._pace_smooth)
+
+        # 1. Percussive transient density (onsets/s, ~1.2 slow -> ~5.5 peak).
+        transient_drive = _clip01((onset_density - 1.4) / 4.2)
+
+        # 2. High-band subdivision rate (~1.5 Hz quarter-note -> ~8.5 Hz 16th-note hats)
+        #    plus high-frequency spectral brightness.
+        hat_hz = self._hat_density()
+        total_e = bass_e + mid_e + treble_e + _EPS
+        high_share = treble_e / total_e
+        hat_drive = _clip01(
+            0.72 * _clip01((hat_hz - 1.8) / 6.5)
+            + 0.28 * _clip01((high_share - 0.04) / 0.22)
+        )
+
+        # 4. True tempo factor (80 BPM -> 0.0, 144 BPM -> 1.0).
+        tempo_drive = _clip01((bpm - 80.0) / 64.0) if bpm > 0 else 0.25
+
+        # 3. Kick punch & pulse drive, scaled by tempo so slow 75-90 BPM kicks
+        #    do not inflate chase pace like 135 BPM club kicks.
+        kick_drive = _clip01(
+            kick_depth * (0.60 + 0.40 * kick_regularity) * (0.45 + 0.55 * tempo_drive)
+        )
+
+        # 5. Genre Agent arousal prior.
+        genre_arousal = (
+            _clip01(genre.arousal_prior)
+            if (genre is not None and genre.backend != "off")
+            else 0.50
+        )
+
+        # 6. Modest within-track relative loudness lift (never dominates flat masters).
+        dynamic_lift = _clip01((energy_norm - 0.80) / 0.55)
+
+        raw = (
+            0.22 * transient_drive
+            + 0.24 * hat_drive
+            + 0.16 * kick_drive
+            + 0.18 * tempo_drive
+            + 0.12 * genre_arousal
+            + 0.08 * dynamic_lift
+        )
+
+        alpha = 1.0 - float(np.exp(-self.dt / _PACE_SMOOTH_SECONDS))
+        self._pace_smooth += alpha * (raw - self._pace_smooth)
+        return _clip01(self._pace_smooth)
+
     def _bpm_rate_bounds(self) -> tuple[int, int]:
         """Inclusive index range from config (swapped if min/max inverted)."""
         lo = _BPM_RATE_NAME_TO_INDEX.get(
@@ -675,32 +860,80 @@ class FeatureExtractor:
             lo, hi = hi, lo
         return lo, hi
 
-    def _update_bpm_rate(self, energy_norm: float) -> float:
-        """Pick full/half/quarter/eighth BPM from recent energy.
-
-        Thresholds mix absolute energy_norm (1.0 = recent average) with
-        percentiles of the last 90 s. Jumps up immediately; decay_seconds
-        holds before each step down. DMX values snap with no fade.
-        """
-        # Smooth over ~2 s — ignore between-kick dips.
-        a_e = 1.0 - float(np.exp(-self.dt / _BPM_RATE_ENERGY_SMOOTH_SECONDS))
-        self._bpm_rate_energy += a_e * (energy_norm - self._bpm_rate_energy)
-
-        if self._frames_seen % self._bpm_rate_hist_every == 0:
-            self._bpm_rate_history.append(self._bpm_rate_energy)
-
-        lo, hi = self._bpm_rate_bounds()
-        # Keep index inside the live-configured band.
-        if self._bpm_rate_index < lo or self._bpm_rate_index > hi:
-            self._bpm_rate_index = max(lo, min(hi, self._bpm_rate_index))
+    def _update_bpm_rate(
+        self,
+        *,
+        pace_score: float,
+        above_floor: bool,
+        kick_depth: float,
+        bass_norm: float,
+        build_score: float,
+        genre: GenreControlVector | None,
+        section: str,
+    ) -> float:
+        """Map intrinsic pace + section + genre envelope onto 32/64/128/255."""
+        cfg_lo, cfg_hi = self._bpm_rate_bounds()
+        if not above_floor:
+            self._bpm_rate_index = cfg_lo
+            self._bpm_rate_current = float(_BPM_RATE_LEVELS[cfg_lo])
+            self._bpm_rate_target = self._bpm_rate_current
             self._bpm_rate_down_timer = 0.0
+            return self._bpm_rate_current
 
-        desired = self._bpm_rate_index_for_energy(self._bpm_rate_energy)
-        desired = max(lo, min(hi, desired))
-        idx = self._apply_bpm_rate_decay(desired)
+        sec = (section or "groove").lower()
+
+        # Map intrinsic pace_score onto 0..3 with hysteresis deadband so a steady
+        # groove does not chatter on a threshold boundary.
+        cur = self._bpm_rate_index
+        up_thresholds = (0.31, 0.53, 0.72)
+        down_thresholds = (0.25, 0.46, 0.65)
+
+        desired = cur
+        while desired < 3 and pace_score >= up_thresholds[desired]:
+            desired += 1
+        while desired > 0 and pace_score < down_thresholds[desired - 1]:
+            desired -= 1
+
+        # Apply section modulation and Genre Agent rate envelope.
+        genre_ceiling = 3
+        if genre is not None and genre.backend != "off":
+            g_min = int(round(_clip01(genre.groove_rate_min / 3.0) * 3.0))
+            g_max = int(round(_clip01(genre.groove_rate_max / 3.0) * 3.0))
+            d_max = int(round(_clip01(genre.drop_rate_max / 3.0) * 3.0))
+            if g_min > g_max:
+                g_min, g_max = g_max, g_min
+            if d_max < g_max:
+                d_max = g_max
+            genre_ceiling = d_max if sec == "drop" else g_max
+
+            if sec == "breakdown" or (kick_depth < 0.14 and bass_norm < 0.52):
+                desired = min(desired, min(1, g_max))
+            elif sec == "drop":
+                desired = min(d_max, max(desired + 1, g_max))
+            elif sec == "buildup":
+                if build_score > 0.65:
+                    desired = min(d_max, max(desired, g_max))
+                else:
+                    desired = max(g_min, min(g_max, desired))
+            else:
+                desired = max(g_min, min(g_max, desired))
+        else:
+            if sec == "breakdown" or (kick_depth < 0.14 and bass_norm < 0.52):
+                desired = min(desired, 1)
+            elif sec == "drop":
+                desired = min(3, desired + 1)
+
+        # Enforce genre hard ceiling & operator-configured safety bounds immediately.
+        effective_hi = min(cfg_hi, max(cfg_lo, genre_ceiling))
+        desired = max(cfg_lo, min(effective_hi, desired))
+        if self._bpm_rate_index < cfg_lo or self._bpm_rate_index > effective_hi:
+            idx = max(cfg_lo, min(effective_hi, desired))
+            self._bpm_rate_down_timer = 0.0
+        else:
+            idx = self._apply_bpm_rate_decay(desired)
 
         target = float(_BPM_RATE_LEVELS[idx])
-        if idx != self._bpm_rate_index:
+        if idx != self._bpm_rate_index or self._bpm_rate_target != target:
             self._bpm_rate_index = idx
             self._bpm_rate_from = self._bpm_rate_current
             self._bpm_rate_target = target
@@ -730,50 +963,7 @@ class FeatureExtractor:
         self._bpm_rate_down_timer += self.dt
         if self._bpm_rate_down_timer >= decay:
             self._bpm_rate_down_timer = 0.0
-            return i - 1  # one step per decay window
-        return i
-
-    def _bpm_rate_index_for_energy(self, energy: float) -> int:
-        """Map energy → rate index. Jump up as far as energy justifies.
-
-        0=eighth(32), 1=quarter(64), 2=half(128), 3=full(255)
-        """
-        if energy >= 1.28:
-            abs_idx = 3
-        elif energy >= 1.10:
-            abs_idx = 2
-        elif energy >= 0.88:
-            abs_idx = 1
-        else:
-            abs_idx = 0
-
-        hist = self._bpm_rate_history
-        min_samples = int(_BPM_RATE_MIN_HISTORY_SECONDS * _BPM_RATE_HISTORY_HZ)
-        if len(hist) < max(8, min_samples // 4):
-            return abs_idx
-
-        arr = np.asarray(hist, dtype=np.float64)
-        q25, q50, q75 = (float(x) for x in np.percentile(arr, (25, 50, 75)))
-        span = max(q75 - q25, 0.05)
-        q25 = min(q25, q50 - 0.15 * span)
-        q75 = max(q75, q50 + 0.15 * span)
-
-        if energy >= q75:
-            perc_idx = 3
-        elif energy >= q50:
-            perc_idx = 2
-        elif energy >= q25:
-            perc_idx = 1
-        else:
-            perc_idx = 0
-
-        i = self._bpm_rate_index
-        up_idx = max(abs_idx, perc_idx)
-        down_idx = min(abs_idx, perc_idx)
-        if up_idx > i:
-            return up_idx
-        if down_idx < i:
-            return down_idx
+            return i - 1
         return i
 
     def _melody_score(
@@ -785,35 +975,23 @@ class FeatureExtractor:
         build_score: float,
         onset_density: float,
     ) -> float:
-        """Kick still present, but mid/high content is the focus.
-
-        Typical techno/house "melodic" stretches: four-on-the-floor keeps
-        going while pads, leads, or chords take the ear. That shows up as
-        elevated 250 Hz–8 kHz energy (and a brighter spectrum vs bass)
-        without the kick disappearing (that would be a breakdown).
-        """
+        """Kick still present, but mid/high content is the focus."""
         if self._t < WARMUP_SECONDS:
             self._melody_smooth = 0.0
             return 0.0
 
-        # Gate: require the kick band near/above its average.
         kick_gate = _clip01((bass_norm - 0.55) / 0.35)
-
-        # Prefer sustained mid (pads/leads) over pure treble (hats).
         mid_lift = _clip01((mid_norm - 0.95) / 0.35)
         treble_lift = _clip01((treble_norm - 0.95) / 0.45)
 
-        # Spectrum tilted brighter than usual (more mid+high per unit bass).
         tilt_norm = tilt / (self._tilt_base + _EPS)
         tilt_lift = _clip01((tilt_norm - 1.05) / 0.3)
 
         tone = 0.55 * mid_lift + 0.15 * treble_lift + 0.30 * tilt_lift
-        # Soft-mute hard builds and busy hat storms.
         build_mute = 1.0 - 0.75 * build_score
         perc_mute = _clip01(1.0 - (onset_density - 3.5) / 5.0)
         raw = _clip01(1.85 * kick_gate * tone * build_mute * perc_mute)
 
-        # ~0.8 s EMA — readable as a lighting fader, not a twitch meter.
         alpha = 1.0 - float(np.exp(-self.dt / 0.8))
         self._melody_smooth += alpha * (raw - self._melody_smooth)
         return _clip01(self._melody_smooth)
@@ -826,13 +1004,7 @@ class FeatureExtractor:
         flux: float,
         bass_norm: float,
     ) -> float:
-        """Composite build tension from slopes, level lifts, and filter opens.
-
-        The score is only recomputed when the (10 Hz) trend histories grow,
-        which is roughly every eighth hop — fitting seven least-squares
-        slopes at the full hop rate was the single most expensive thing the
-        analyser did.
-        """
+        """Composite build tension from slopes, level lifts, and filter opens."""
         alpha_flux = max(self._alpha_slow, 1.0 / max(self._frames_seen, 1))
         self._flux_base += alpha_flux * (flux - self._flux_base)
 
@@ -860,17 +1032,14 @@ class FeatureExtractor:
         onset_slope = _absolute_slope(self._onset_trend)
         bass_slope = _relative_slope(self._bass_trend)
 
-        # Level lift: second half of the window vs first half (slow builds).
         lift = max(_half_lift(self._rms_trend), _half_lift(self._treble_trend))
 
-        # Filter-open: highs rising while the kick is flat or falling.
         treble_rise = _clip01(treble_slope / (cfg.full_scale_treble_slope + _EPS))
         bass_not_rising = _clip01(
             1.0 - bass_slope / (cfg.full_scale_energy_slope + _EPS)
         )
         divergence = treble_rise * bass_not_rising
 
-        # Activity: busy hats / spectral flux above baseline.
         onset_level = float(np.mean(self._onset_trend))
         flux_level = float(np.mean(self._flux_trend)) if self._flux_trend else 0.0
         activity = _clip01(
@@ -923,10 +1092,7 @@ def _clip01(x: float) -> float:
 def _asymmetric_base(
     base: float, value: float, alpha: float, *, hold_high: bool = False
 ) -> float:
-    """Skewed EMA. Default: follow drops faster than rises (mid/treble).
-
-    hold_high: follow rises faster and drops slowly (kick baseline).
-    """
+    """Skewed EMA. Default: follow drops faster than rises (mid/treble)."""
     if hold_high:
         rate = alpha * (1.25 if value > base else 0.22)
     else:

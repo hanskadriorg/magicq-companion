@@ -1321,6 +1321,24 @@ def _dispatch_post_sync(manager: _Manager, path: str, raw_body: bytes) -> tuple[
                 manager.stop_all()
             except Exception:
                 pass
+            env = dict(os.environ)
+            env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+            has_systemd = (
+                subprocess.run(
+                    ["systemctl", "--user", "is-enabled", "magicq-venue.service"],
+                    env=env,
+                    capture_output=True,
+                    check=False,
+                ).returncode
+                == 0
+            )
+            if has_systemd:
+                subprocess.Popen(  # noqa: S603
+                    ["systemctl", "--user", "restart", "magicq-venue.service"],
+                    env=env,
+                    start_new_session=True,
+                )
+                os._exit(0)
             root = (
                 Path(manager.config_path).resolve().parent
                 if manager.config_path

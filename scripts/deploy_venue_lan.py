@@ -103,7 +103,13 @@ class SshRunner:
         return env
 
     def ssh(
-        self, target: str, remote_cmd: str, *, timeout: float = 180.0, check: bool = True
+        self,
+        target: str,
+        remote_cmd: str,
+        *,
+        stdin_text: str | None = None,
+        timeout: float = 180.0,
+        check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         cmd = [
             "setsid",
@@ -119,7 +125,8 @@ class SshRunner:
         return subprocess.run(
             cmd,
             env=self._env(),
-            stdin=subprocess.DEVNULL,
+            input=stdin_text,
+            stdin=None if stdin_text is not None else subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -180,12 +187,14 @@ if command -v systemctl >/dev/null 2>&1; then
   XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user stop magicq-venue.service >/dev/null 2>&1 || true
   XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user stop magicq-companion.service >/dev/null 2>&1 || true
 fi
+pkill -f "matter_sidecar/dist/index.js" >/dev/null 2>&1 || true
+pkill -f "\.venv/bin/python -m magicq_companion" >/dev/null 2>&1 || true
 sleep 1
 rm -f /tmp/magicq-companion.lock
 
-# Clean legacy @reboot entries pointing to old magicq-companion directory
+# Clean legacy @reboot entries so systemd handles boot while keeping scheduled reboots
 if command -v crontab >/dev/null 2>&1; then
-  (crontab -l 2>/dev/null | grep -v "magicq-companion/packaging/start-companion.sh" || true) | crontab - 2>/dev/null || true
+  (crontab -l 2>/dev/null | grep -v "# magicq-companion boot" || true) | crontab - 2>/dev/null || true
 fi
 
 echo "  -> Unpacking MagicQ Venue Companion into $DEST..."
@@ -199,15 +208,14 @@ fi
 
 echo "  -> Ensuring system packages (python3-venv, libportaudio2)..."
 if ! python3 -m venv --help >/dev/null 2>&1 || ! ldconfig -p 2>/dev/null | grep -q libportaudio; then
-  printf '%s\n' "$PASS" | sudo -S -p '' apt-get update -qq >/dev/null
-  printf '%s\n' "$PASS" | sudo -S -p '' apt-get install -y -qq python3-venv python3-pip libportaudio2 alsa-utils libgomp1 >/dev/null
+  printf '%s\n' "$PASS" | sudo -S -p '' env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null
+  printf '%s\n' "$PASS" | sudo -S -p '' env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv python3-pip libportaudio2 alsa-utils libgomp1 >/dev/null
 fi
 
 echo "  -> Setting up Python venv & dependencies..."
 if [ ! -x "$DEST/.venv/bin/python" ]; then
   python3 -m venv "$DEST/.venv"
 fi
-"$DEST/.venv/bin/python" -m pip install -q --upgrade pip
 "$DEST/.venv/bin/pip" install -q -r "$DEST/requirements.txt"
 
 if [ ! -s "$DEST/models/discogs-effnet-bsdynamic-1.onnx" ]; then
@@ -219,7 +227,7 @@ chmod +x "$DEST/packaging/start-companion.sh" "$DEST/packaging/install-venue.sh"
 
 echo "  -> Configuring unattended auto-start..."
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-if command -v loginctl >/dev/null 2>&1; then
+if command -v loginctl >/dev/null 2>&1 && [ ! -f "/var/lib/systemd/linger/$(id -un)" ]; then
   printf '%s\n' "$PASS" | sudo -S -p '' loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
 fi
 
@@ -234,7 +242,7 @@ After=network.target sound.target pipewire.service
 [Service]
 Type=simple
 WorkingDirectory=$DEST
-ExecStart=$DEST/.venv/bin/python -m magicq_companion --ui --config $DEST/config.toml
+ExecStart=$DEST/packaging/start-companion.sh
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
@@ -318,7 +326,8 @@ def deploy_target(runner: SshRunner, target: str, tarball: Path, password: str) 
     pass_b64 = base64.b64encode(password.encode("utf-8")).decode("ascii")
     res = runner.ssh(
         target,
-        f"bash -s -- '{pass_b64}' <<'END_REMOTE_SCRIPT'\n{REMOTE_SETUP_SCRIPT}\nEND_REMOTE_SCRIPT",
+        f"bash -s -- '{pass_b64}'",
+        stdin_text=REMOTE_SETUP_SCRIPT,
         timeout=300.0,
         check=False,
     )

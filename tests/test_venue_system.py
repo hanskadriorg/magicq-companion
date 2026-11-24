@@ -165,6 +165,9 @@ intensity = 0.42
     def test_web_ui_http_routes_and_websocket_telemetry(self) -> None:
         cfg = Config()
         port = _free_port()
+        tmp_dir = tempfile.TemporaryDirectory()
+        cfg_file = Path(tmp_dir.name) / "config.toml"
+        cfg_file.write_text("[genre]\nmode = \"auto\"\n", encoding="utf-8")
 
         def sim_source(_c: Config):
             def gen():
@@ -181,7 +184,7 @@ intensity = 0.42
             dry_run=True,
             pace=True,
             duration=None,
-            config_path=None,
+            config_path=str(cfg_file),
             simulate=True,
         )
         manager.start(sim_source(cfg))
@@ -263,11 +266,41 @@ intensity = 0.42
             probed = probe_remote_dashboard("127.0.0.1", port=port, timeout=3.0)
             self.assertEqual(probed["config"]["meta"]["genre_mode"], "groovy_warm")
             self.assertIn("pace", probed["ws"])
+            self.assertIn("fx_size", probed["ws"])
+            self.assertIn("policy", probed["ws"])
+
+            # Verify online learning via /settings updates groovy_warm profile & persists.
+            learn_req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/settings",
+                data=json.dumps({"fx_size_base": 122, "fx_size_max": 244, "drop_intensity": 0.66}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(learn_req, timeout=3) as resp:
+                learn_res = json.loads(resp.read().decode("utf-8"))
+                self.assertIn("learned into Deep / Warm Groove", learn_res["message"])
+
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/genre/profiles", timeout=3) as resp:
+                prof_data = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(prof_data["profiles"]["groovy_warm"]["fx_size_base"], 122)
+                self.assertEqual(prof_data["profiles"]["groovy_warm"]["edits"], 1)
+                self.assertEqual(prof_data["profiles"]["club_peak"]["edits"], 0)
+
+            reset_req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/genre/reset",
+                data=json.dumps({"archetype": "groovy_warm"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(reset_req, timeout=3) as resp:
+                reset_res = json.loads(resp.read().decode("utf-8"))
+                self.assertTrue(reset_res["ok"])
         finally:
             manager.stop_all()
             if srv_task:
                 loop.call_soon_threadsafe(srv_task[0].cancel)
             server_thread.join(timeout=2.0)
+            tmp_dir.cleanup()
 
     def test_deploy_bundle_tarball_contains_required_files_without_runtime_junk(self) -> None:
         import tarfile

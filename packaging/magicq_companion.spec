@@ -33,6 +33,7 @@ a = Analysis(
         "magicq_companion.dmx",
         "magicq_companion.features",
         "magicq_companion.genre_agent",
+        "magicq_companion.genre_profiles",
         "magicq_companion.monitor",
         "magicq_companion.paths",
         "magicq_companion.pipeline",

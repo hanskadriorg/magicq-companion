@@ -17,6 +17,7 @@ from itertools import islice
 from .config import STYLE_PROFILES, DetectionConfig
 from .features import WARMUP_SECONDS, Features
 from .genre_agent import GenreControlVector
+from .genre_profiles import GenrePolicy
 
 
 class Section(Enum):
@@ -57,6 +58,7 @@ class SectionTracker:
         self._style_guess = "club"
         self._style_hold = 0.0
         self._genre: GenreControlVector | None = None
+        self._policy: GenrePolicy | None = None
         self._last_solid_kick_t = -100.0
         self._heard_kick = False
         self._kick_gone_s = 0.0
@@ -72,6 +74,10 @@ class SectionTracker:
         mode = str(getattr(self.cfg, "style", "auto") or "auto").lower()
         return mode == "auto" and self._genre is not None and self._genre.backend != "off"
 
+    def _using_policy(self) -> bool:
+        mode = str(getattr(self.cfg, "style", "auto") or "auto").lower()
+        return mode == "auto" and self._policy is not None
+
     def _profile(self) -> dict:
         return STYLE_PROFILES.get(self.style_resolved, STYLE_PROFILES["club"])
 
@@ -82,10 +88,14 @@ class SectionTracker:
 
     @property
     def build_intensity(self) -> float:
+        if self._using_policy():
+            return max(0.0, min(1.0, float(self._policy.build_intensity)))  # type: ignore[union-attr]
         return self._clamp01("build_intensity")
 
     @property
     def drop_intensity(self) -> float:
+        if self._using_policy():
+            return max(0.0, min(1.0, float(self._policy.drop_intensity)))  # type: ignore[union-attr]
         extra = self._param("drop_intensity_add", 0.0)
         return max(0.0, min(1.0, self._clamp01("drop_intensity") + extra))
 
@@ -123,6 +133,8 @@ class SectionTracker:
         return need * self._param("groove_return_mul", 1.0)
 
     def _breakdown_intensity(self) -> float:
+        if self._using_policy():
+            return max(0.0, min(1.0, float(self._policy.breakdown_intensity)))  # type: ignore[union-attr]
         try:
             return max(0.0, min(1.0, float(self.cfg.breakdown_intensity)))
         except (TypeError, ValueError, AttributeError):
@@ -136,6 +148,8 @@ class SectionTracker:
         return max(0.35, dwell)
 
     def _drop_hold(self) -> float:
+        if self._using_policy():
+            return max(1.0, float(self._policy.drop_hold_seconds))  # type: ignore[union-attr]
         return max(1.0, self.cfg.drop_hold_seconds * self._param("drop_hold_mul", 1.0))
 
     def _expected_build(self) -> float:
@@ -149,15 +163,22 @@ class SectionTracker:
 
     def _build_decay(self) -> float:
         """Seconds of 'not building' before BUILDUP falls back to GROOVE."""
+        if self._using_policy():
+            return max(0.25, float(self._policy.build_decay_seconds))  # type: ignore[union-attr]
         base = max(0.25, float(getattr(self.cfg, "build_decay_seconds", 8.0)))
         return base * self._param("build_decay_mul", 1.0)
 
     def _drop_jump_ratio(self) -> float:
+        # Keep fast drop-sensing parameters on Layer 2 while honoring Layer 1 drop_intensity.
         jump = self.cfg.drop_energy_jump * (1.25 - 0.5 * self.drop_intensity)
+        if self._using_policy():
+            return max(1.02, jump)
         return jump * self._param("drop_jump_mul", 1.0)
 
     def _drop_rise_needed(self) -> float:
         rise = float(getattr(self.cfg, "drop_rise", 0.40))
+        if self._using_policy():
+            return max(0.05, rise * (1.20 - 0.40 * self.drop_intensity))
         return max(0.05, rise * self._param("drop_rise_mul", 1.0))
 
     def evidence(self) -> dict:
@@ -186,9 +207,11 @@ class SectionTracker:
         dt: float,
         *,
         genre: GenreControlVector | None = None,
+        policy: GenrePolicy | None = None,
     ) -> Section:
         cfg = self.cfg
         self._genre = genre
+        self._policy = policy
         self.t_in_state += dt
         self._t_total += dt
 
@@ -326,12 +349,16 @@ class SectionTracker:
         period = 60.0 / f.bpm if f.bpm >= 60.0 else 0.50
         inten = self._breakdown_intensity()
         sync_tol = self._syncopation_tolerance()
-        try:
-            user_beats = max(1.0, min(16.0, float(self.cfg.breakdown_beats)))
-        except (TypeError, ValueError, AttributeError):
-            user_beats = 4.0
-        style_beats = self._param("breakdown_beats", 4.0)
-        beats = user_beats * (style_beats / 4.0) * (1.50 - 0.85 * inten)
+        if self._using_policy():
+            base_beats = max(1.0, min(16.0, float(self._policy.breakdown_beats)))  # type: ignore[union-attr]
+            beats = base_beats * (1.50 - 0.85 * inten)
+        else:
+            try:
+                user_beats = max(1.0, min(16.0, float(self.cfg.breakdown_beats)))
+            except (TypeError, ValueError, AttributeError):
+                user_beats = 4.0
+            style_beats = self._param("breakdown_beats", 4.0)
+            beats = user_beats * (style_beats / 4.0) * (1.50 - 0.85 * inten)
         # Syncopated genres (hip-hop, trap, DnB, breakbeat) naturally leave gaps
         # between sub-kicks while snares/hats carry the rhythm.
         beats *= 1.0 + 0.90 * sync_tol

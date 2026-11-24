@@ -21,8 +21,10 @@ from .config import (
     BpmRateConfig,
     BuildScoreConfig,
     DetectionConfig,
+    FxSizeConfig,
 )
 from .genre_agent import GenreControlVector
+from .genre_profiles import GenrePolicy
 
 _EPS = 1e-9
 
@@ -123,6 +125,8 @@ class Features:
     beat_in_bar: int = 0
     # Chase-rate DMX value: snaps between 32/64/128/255 (1/8 … full BPM).
     bpm_rate: float = 32.0
+    # Dynamic FX size DMX value (0..255): genre base + fast bump on energy rises/drops.
+    fx_size: float = 0.0
     # Live Genre Agent telemetry attached for dashboard & logging.
     archetype: str = "house_tech"
     archetype_label: str = "House / Tech House"
@@ -140,6 +144,7 @@ class FeatureExtractor:
         detection: DetectionConfig,
         build_cfg: BuildScoreConfig,
         bpm_rate_cfg: BpmRateConfig | None = None,
+        fx_size_cfg: FxSizeConfig | None = None,
         win: int = 2048,
         noise_floor_db: float = -55.0,
     ) -> None:
@@ -151,6 +156,7 @@ class FeatureExtractor:
         self.detection = detection
         self.build_cfg = build_cfg
         self.bpm_rate_cfg = bpm_rate_cfg or BpmRateConfig()
+        self.fx_size_cfg = fx_size_cfg or FxSizeConfig()
         self.noise_floor_db = float(noise_floor_db)
 
         self._buffer = np.zeros(win, dtype=np.float64)
@@ -187,6 +193,9 @@ class FeatureExtractor:
         self._last_hat_t = -10.0
         self._hat_times: deque[float] = deque(maxlen=96)
         self._pace_smooth = 0.35
+        self._fx_size_current = 0.0
+        self._size_energy_fast = 1.0
+        self._size_flux_fast = 1.0
 
         # BPM-rate state (32/64/128/255).
         lo, hi = self._bpm_rate_bounds()
@@ -259,7 +268,9 @@ class FeatureExtractor:
         block: np.ndarray,
         *,
         genre: GenreControlVector | None = None,
+        policy: GenrePolicy | None = None,
         section: str = "groove",
+        build_progress: float = 0.0,
     ) -> Features:
         """Consume one hop of mono samples and return the current features."""
         self._t += self.dt
@@ -347,7 +358,7 @@ class FeatureExtractor:
         kick_depth = self._update_kick_depth(above_floor)
         kick_reg = self._kick_regularity()
         four_four_beat = self._update_four_four_grid(
-            beat, bpm, above_floor, kick_depth
+            beat, bpm, above_floor, kick_depth, policy=policy
         )
 
         build_score = self._update_trends_and_build_score(
@@ -376,7 +387,20 @@ class FeatureExtractor:
             bass_norm=bass_norm,
             build_score=build_score,
             genre=genre,
+            policy=policy,
             section=section,
+        )
+        fx_size = self._update_fx_size(
+            above_floor=above_floor,
+            energy_norm=energy_norm,
+            flux=flux,
+            pace_score=pace_score,
+            kick_depth=kick_depth,
+            bass_norm=bass_norm,
+            build_score=build_score,
+            build_progress=build_progress,
+            section=section,
+            policy=policy,
         )
         spectrum_db = self._spectrum_db(mag) if self.visualizer else ()
 
@@ -416,6 +440,7 @@ class FeatureExtractor:
             four_four_locked=self._grid_locked,
             beat_in_bar=self._beat_in_bar,
             bpm_rate=bpm_rate,
+            fx_size=fx_size,
             archetype=arch,
             archetype_label=arch_label,
             genre_tags_text=tags_text,
@@ -639,10 +664,16 @@ class FeatureExtractor:
         return _clip01(0.70 * c_beat + 0.30 * c_sub)
 
     def _update_four_four_grid(
-        self, kick: bool, bpm: float, above_floor: bool, kick_depth: float
+        self,
+        kick: bool,
+        bpm: float,
+        above_floor: bool,
+        kick_depth: float,
+        *,
+        policy: GenrePolicy | None = None,
     ) -> bool:
         """Advance a 4/4 quarter-note grid; return True when a beat fires."""
-        need, miss_beats, reg_need, depth_need = self._four_four_params()
+        need, miss_beats, reg_need, depth_need = self._four_four_params(policy)
         if bpm > 0:
             if abs(bpm - self._grid_bpm) > 0.08 * self._grid_bpm:
                 self._grid_bpm = bpm
@@ -687,9 +718,14 @@ class FeatureExtractor:
 
         return fired
 
-    def _four_four_params(self) -> tuple[int, float, float, float]:
+    def _four_four_params(
+        self, policy: GenrePolicy | None = None
+    ) -> tuple[int, float, float, float]:
         """Kicks needed, miss-window, regularity floor, kick-depth floor."""
-        inten = _clip01(float(getattr(self.detection, "four_four_intensity", 0.55)))
+        if policy is not None:
+            inten = _clip01(float(policy.four_four_intensity))
+        else:
+            inten = _clip01(float(getattr(self.detection, "four_four_intensity", 0.55)))
         need = max(3, min(8, int(round(7.0 - 4.0 * inten))))
         miss_beats = 1.0 + 2.0 * inten
         reg_need = 0.28 + 0.42 * (1.0 - inten)
@@ -869,9 +905,10 @@ class FeatureExtractor:
         bass_norm: float,
         build_score: float,
         genre: GenreControlVector | None,
+        policy: GenrePolicy | None,
         section: str,
     ) -> float:
-        """Map intrinsic pace + section + genre envelope onto 32/64/128/255."""
+        """Map intrinsic pace + section + GenrePolicy envelope onto 32/64/128/255."""
         cfg_lo, cfg_hi = self._bpm_rate_bounds()
         if not above_floor:
             self._bpm_rate_index = cfg_lo
@@ -882,8 +919,6 @@ class FeatureExtractor:
 
         sec = (section or "groove").lower()
 
-        # Map intrinsic pace_score onto 0..3 with hysteresis deadband so a steady
-        # groove does not chatter on a threshold boundary.
         cur = self._bpm_rate_index
         up_thresholds = (0.31, 0.53, 0.72)
         down_thresholds = (0.25, 0.46, 0.65)
@@ -894,9 +929,33 @@ class FeatureExtractor:
         while desired > 0 and pace_score < down_thresholds[desired - 1]:
             desired -= 1
 
-        # Apply section modulation and Genre Agent rate envelope.
+        # Layer 1 (GenrePolicy / GenreControlVector) sets macro floor & ceiling;
+        # Layer 2 (section & fast track energy) modulates immediately within it.
         genre_ceiling = 3
-        if genre is not None and genre.backend != "off":
+        decay_override: float | None = None
+        if policy is not None:
+            g_min = int(round(_clip01(policy.bpm_rate_min_idx / 3.0) * 3.0))
+            g_max = int(round(_clip01(policy.bpm_rate_max_idx / 3.0) * 3.0))
+            d_max = int(round(_clip01(policy.bpm_rate_drop_max_idx / 3.0) * 3.0))
+            decay_override = max(0.0, float(policy.bpm_rate_decay))
+            if g_min > g_max:
+                g_min, g_max = g_max, g_min
+            if d_max < g_max:
+                d_max = g_max
+            genre_ceiling = d_max if sec == "drop" else g_max
+
+            if sec == "breakdown" or (kick_depth < 0.14 and bass_norm < 0.52):
+                desired = min(desired, min(1, g_max))
+            elif sec == "drop":
+                desired = min(d_max, max(desired + 1, g_max))
+            elif sec == "buildup":
+                if build_score > 0.65:
+                    desired = min(d_max, max(desired, g_max))
+                else:
+                    desired = max(g_min, min(g_max, desired))
+            else:
+                desired = max(g_min, min(g_max, desired))
+        elif genre is not None and genre.backend != "off":
             g_min = int(round(_clip01(genre.groove_rate_min / 3.0) * 3.0))
             g_max = int(round(_clip01(genre.groove_rate_max / 3.0) * 3.0))
             d_max = int(round(_clip01(genre.drop_rate_max / 3.0) * 3.0))
@@ -930,7 +989,7 @@ class FeatureExtractor:
             idx = max(cfg_lo, min(effective_hi, desired))
             self._bpm_rate_down_timer = 0.0
         else:
-            idx = self._apply_bpm_rate_decay(desired)
+            idx = self._apply_bpm_rate_decay(desired, decay_override=decay_override)
 
         target = float(_BPM_RATE_LEVELS[idx])
         if idx != self._bpm_rate_index or self._bpm_rate_target != target:
@@ -950,13 +1009,19 @@ class FeatureExtractor:
             )
         return self._bpm_rate_current
 
-    def _apply_bpm_rate_decay(self, desired: int) -> int:
+    def _apply_bpm_rate_decay(
+        self, desired: int, *, decay_override: float | None = None
+    ) -> int:
         """Step up immediately; hold before each step down (decay_seconds)."""
         i = self._bpm_rate_index
         if desired >= i:
             self._bpm_rate_down_timer = 0.0
             return desired
-        decay = max(0.0, float(self.bpm_rate_cfg.decay_seconds))
+        decay = (
+            max(0.0, float(decay_override))
+            if decay_override is not None
+            else max(0.0, float(self.bpm_rate_cfg.decay_seconds))
+        )
         if decay <= 0.0:
             self._bpm_rate_down_timer = 0.0
             return desired
@@ -965,6 +1030,78 @@ class FeatureExtractor:
             self._bpm_rate_down_timer = 0.0
             return i - 1
         return i
+
+    def _update_fx_size(
+        self,
+        *,
+        above_floor: bool,
+        energy_norm: float,
+        flux: float,
+        pace_score: float,
+        kick_depth: float,
+        bass_norm: float,
+        build_score: float,
+        build_progress: float,
+        section: str,
+        policy: GenrePolicy | None,
+    ) -> float:
+        """Compute DMX 0..255 FX Size (Layer 1 genre base + Layer 2 fast energy/drop bump).
+
+        Uses an asymmetric envelope (65 ms fast attack on rises/drops, 1.35 s
+        smooth release) so moving heads and dimmer spreads punch up immediately
+        on energy surges and drops without wobbling between individual kicks.
+        """
+        if policy is not None:
+            size_base = max(0.0, min(255.0, float(policy.fx_size_base)))
+            size_max = max(size_base, min(255.0, float(policy.fx_size_max)))
+            reactivity = _clip01(float(policy.fx_size_reactivity))
+        else:
+            size_base = max(0.0, min(255.0, float(self.fx_size_cfg.base)))
+            size_max = max(size_base, min(255.0, float(self.fx_size_cfg.max)))
+            reactivity = _clip01(float(self.fx_size_cfg.reactivity))
+
+        if not above_floor:
+            alpha_off = 1.0 - float(np.exp(-self.dt / 0.85))
+            self._fx_size_current += alpha_off * (0.0 - self._fx_size_current)
+            return float(np.clip(self._fx_size_current, 0.0, 255.0))
+
+        # Layer 2 fast track dynamics (~180 ms response, independent of slow genre EMA).
+        a_fast = 1.0 - float(np.exp(-self.dt / 0.18))
+        self._size_energy_fast += a_fast * (energy_norm - self._size_energy_fast)
+        flux_norm = flux / (self._flux_base + _EPS) if self._flux_base > _EPS else 1.0
+        self._size_flux_fast += a_fast * (flux_norm - self._size_flux_fast)
+
+        energy_surge = _clip01((self._size_energy_fast - 0.94) / 0.42)
+        flux_surge = _clip01((self._size_flux_fast - 1.15) / 1.10)
+        track_lift = _clip01(0.68 * energy_surge + 0.32 * flux_surge)
+
+        span = max(0.0, size_max - size_base)
+        sec = (section or "groove").lower()
+        bp = _clip01(float(build_progress))
+
+        if sec == "drop":
+            # Immediate bump to genre peak ceiling on DROP.
+            drop_floor = size_base + span * (0.75 + 0.25 * reactivity)
+            target = min(255.0, max(drop_floor, size_base + span * (0.85 + 0.20 * track_lift)))
+        elif sec == "breakdown" or (kick_depth < 0.14 and bass_norm < 0.52):
+            # Calm narrow spread in breakdowns, expanding gently if building out.
+            calm_base = size_base * (0.42 + 0.35 * bp)
+            target = min(size_max, calm_base + 0.30 * reactivity * span * track_lift)
+        elif sec == "buildup":
+            # Swell progressively with build_progress and rising track energy.
+            swell = _clip01(0.18 + 0.58 * bp + 0.35 * reactivity * track_lift)
+            target = min(size_max, size_base + span * swell)
+        else:
+            # Groove: genre baseline modulated by pace + fast bump on energy rises.
+            groove_base = min(size_max, size_base * (0.85 + 0.25 * pace_score))
+            bump = span * reactivity * _clip01(0.78 * track_lift + 0.22 * build_score)
+            target = min(size_max, groove_base + bump)
+
+        # Asymmetric follower: punch up fast (65 ms), settle smoothly (1.35 s).
+        tau = 0.065 if target > self._fx_size_current else 1.35
+        alpha = 1.0 - float(np.exp(-self.dt / tau))
+        self._fx_size_current += alpha * (target - self._fx_size_current)
+        return float(np.clip(self._fx_size_current, 0.0, 255.0))
 
     def _melody_score(
         self,

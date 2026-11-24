@@ -15,7 +15,7 @@ import sys
 from .config import Config, audio_output_cfg, load_config
 from .monitor import Monitor
 from .output import create_sender, describe_output
-from .paths import default_config_path, is_frozen
+from .paths import default_config_path, default_genre_profiles_path, is_frozen
 from .pipeline import Bridge
 
 
@@ -133,6 +133,7 @@ def main() -> int:
         pace=args.simulate and not args.fast,
         duration=args.duration,
         async_genre=not (args.simulate and args.fast),
+        profiles_path=default_genre_profiles_path(config_path),
     )
     bridge.enabled = bool(cfg.server.startup_output)
 

@@ -224,6 +224,10 @@
   }
   .genre-badge.onnx { border-color: #3d6b4f; background: #16281e; color: #68d391; }
   .genre-badge.manual { border-color: #7a6230; background: #261f12; color: #f6ad55; }
+  .genre-learned {
+    font-size: 10px; padding: 1px 6px; border: 1px solid #55487a;
+    background: #1d182b; color: #cbb6ff;
+  }
   .genre-tags { color: #8a94a6; }
   .evidence { display: grid; gap: 3px; margin-top: 8px; }
   .ev { display: grid; grid-template-columns: 72px 1fr 58px; gap: 6px; align-items: center; }
@@ -263,6 +267,7 @@
   .fill.build  { background: linear-gradient(90deg, #975a16, #ffb020); }
   .fill.ramp   { background: linear-gradient(90deg, #9b2c2c, #ff4757); }
   .fill.pace   { background: linear-gradient(90deg, #2b6cb0, #63b3ed, #a78bfa); }
+  .fill.size   { background: linear-gradient(90deg, #0d9488, #2dd4bf, #99f6e4); }
 
   canvas { width: 100%; height: 90px; display: block; }
 
@@ -465,6 +470,7 @@
                 <span class="genre-badge" id="genreBadge">DSP</span>
                 <strong id="genreArchetype">Detecting genre&hellip;</strong>
                 <span class="genre-tags" id="genreTags"></span>
+                <span class="genre-learned" id="genreLearnedBadge" hidden></span>
               </div>
               <div class="evidence" id="evidenceRow">
                 <div class="ev"><span>Kick gone</span><div class="track"><div class="fill bass" id="mEvKick"></div></div><div class="val" id="vEvKick">&ndash;</div></div>
@@ -520,9 +526,10 @@
           <div class="hero-meters">
             <div class="meter"><div class="name">Pace</div><div class="track"><div class="fill pace" id="mPace"></div></div><div class="val" id="vPace">&ndash;</div></div>
             <div class="meter"><div class="name">Divider</div><div class="track"><div class="fill ramp" id="mBpmRate"></div></div><div class="val" id="vBpmRate">&ndash;</div></div>
+            <div class="meter"><div class="name">FX Size</div><div class="track"><div class="fill size" id="mFxSize"></div></div><div class="val" id="vFxSize">&ndash;</div></div>
             <div class="meter"><div class="name">Build</div><div class="track"><div class="fill build" id="mBuild"></div></div><div class="val" id="vBuild">&ndash;</div></div>
-            <div class="meter"><div class="name">Music</div><div class="track"><div class="fill bass" id="mMusic"></div></div><div class="val" id="vMusic">&ndash;</div></div>
             <div class="meter"><div class="name">Ramp</div><div class="track"><div class="fill ramp" id="mRamp"></div></div><div class="val" id="vRamp">&ndash;</div></div>
+            <div class="meter"><div class="name">Music</div><div class="track"><div class="fill bass" id="mMusic"></div></div><div class="val" id="vMusic">&ndash;</div></div>
           </div>
           <div class="pane-split" data-resize="meters" title="Drag to resize levels"></div>
         </section>
@@ -584,7 +591,7 @@
         </label>
       </div>
       <div class="settings settings-row">
-        <div class="seg-label">Genre Agent &amp; Reactivity</div>
+        <div class="seg-label">Genre Policy Layer (adapts per genre &amp; learns your tweaks)</div>
         <label>Genre agent
           <select id="selGenreMode">
             <option value="auto">Adaptive (Genre AI + DSP)</option>
@@ -607,8 +614,12 @@
             <option value="breakdown">Breakdown-first</option>
           </select>
         </label>
-        <label class="slider-label dual-label">BPM divider safety bounds
-          <span class="field-help">Outer floor/ceiling; Genre Agent &amp; Intrinsic Pace choose within this range.</span>
+        <label class="check-row" style="flex:1 1 200px">
+          <input type="checkbox" id="chkLearning" checked>
+          <span>Learn genre profile from my tweaks</span>
+        </label>
+        <label class="slider-label dual-label">BPM divider (Ch 9)
+          <span class="field-help">Agent-steered chase range for the current genre. Drag to teach this genre.</span>
           <div class="dual-range" id="bpmDivider">
             <div class="dual-rail"><div class="dual-fill" id="bpmDividerFill"></div></div>
             <input type="range" id="rngBpmLo" min="0" max="3" step="1" value="0" aria-label="BPM divider lower floor">
@@ -618,19 +629,31 @@
           <span class="slider-val" id="lblBpmDivider">1/8 &ndash; 1/1</span>
         </label>
         <label class="slider-label">BPM divider decay
-          <span class="field-help">Hold a faster chase divider this long before stepping down.</span>
+          <span class="field-help">Hold faster chase divider before stepping down.</span>
           <input type="range" id="rngBpmDecay" min="0" max="30" step="0.5" value="3">
           <span class="slider-val" id="lblBpmDecay">3 s</span>
         </label>
+        <label class="slider-label dual-label">FX Size range (Ch 10)
+          <span class="field-help">Groove base to drop/peak ceiling (0–255). Bumps up fast on energy rises &amp; drops.</span>
+          <div class="dual-range" id="fxSizeRange">
+            <div class="dual-rail"><div class="dual-fill" id="fxSizeFill"></div></div>
+            <input type="range" id="rngSizeLo" min="0" max="255" step="1" value="100" aria-label="FX size groove base">
+            <input type="range" id="rngSizeHi" min="16" max="255" step="1" value="235" aria-label="FX size peak ceiling">
+            <div class="dual-ticks"><span>0</span><span>64</span><span>128</span><span>192</span><span>255</span></div>
+          </div>
+          <span class="slider-val" id="lblFxSizeRange">100 &ndash; 235</span>
+        </label>
         <div class="actions">
-          <button type="button" class="secondary" id="btnBuildSettings">Build settings&hellip;</button>
-          <button type="button" class="secondary" id="btnDropSettings">Drop settings&hellip;</button>
+          <button type="button" class="secondary" id="btnFxSizeSettings">FX size&hellip;</button>
+          <button type="button" class="secondary" id="btnBuildSettings">Build&hellip;</button>
+          <button type="button" class="secondary" id="btnDropSettings">Drop&hellip;</button>
           <button type="button" class="secondary" id="btnDropHitSettings">Drop hit&hellip;</button>
           <button type="button" class="secondary" id="btnBreakdownSettings">Breakdown&hellip;</button>
           <button type="button" class="secondary" id="btnFourFourSettings">4/4 lock&hellip;</button>
+          <button type="button" class="secondary" id="btnResetGenre" title="Reset learned tweaks for the active genre (Shift+click resets all genres)">Reset genre</button>
           <button type="button" class="secondary" id="btnServerSettings">Unattended / Server&hellip;</button>
           <button type="button" class="secondary" id="btnRefresh" title="Rescan audio devices">Refresh devices</button>
-          <button type="button" id="btnApply">Apply</button>
+          <button type="button" id="btnApply">Apply network</button>
         </div>
       </div>
       <div class="settings-note" id="settingsNote">Loading settings&hellip;</div>
@@ -643,6 +666,40 @@
   </div>
 
   <div class="offline" id="offline">connection lost &mdash; retrying&hellip;</div>
+</div>
+
+<div class="modal-backdrop" id="fxSizeModal">
+  <div class="modal" role="dialog" aria-labelledby="fxSizeTitle">
+    <h3 id="fxSizeTitle">FX Size settings (Ch 10)</h3>
+    <p class="hint">
+      <strong>Genre Profile Layer:</strong> Base &amp; ceiling adapt per genre and learn from your adjustments.
+      <strong>Fast Track Layer:</strong> Energy surges &amp; drops bump Ch 10 up with a fast 65 ms attack and smooth 1.35 s release.
+    </p>
+    <div class="settings">
+      <label class="slider-label">Groove base size (0–255)
+        <span class="field-help">Steady movement/effect spread during normal grooves for this genre.</span>
+        <input type="range" id="rngModalSizeBase" min="0" max="255" step="1" value="100">
+        <span class="slider-val" id="lblModalSizeBase">100</span>
+      </label>
+      <label class="slider-label">Drop / peak ceiling (16–255)
+        <span class="field-help">Maximum FX size reached on energy surges and drops for this genre.</span>
+        <input type="range" id="rngModalSizeMax" min="16" max="255" step="1" value="235">
+        <span class="slider-val" id="lblModalSizeMax">235</span>
+      </label>
+      <label class="slider-label">Energy &amp; drop reactivity
+        <span class="field-help">How strongly track energy lifts and builds push FX size toward the ceiling.</span>
+        <input type="range" id="rngSizeReactivity" min="0" max="100" step="1" value="72">
+        <span class="slider-val" id="lblSizeReactivity">72%</span>
+      </label>
+    </div>
+    <div class="settings-note" id="fxSizeSettingsNote"></div>
+    <div class="settings" style="margin-top:12px">
+      <div class="actions">
+        <button type="button" class="secondary" id="btnFxSizeCancel">Close</button>
+        <button type="button" id="btnFxSizeSave">Save</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="modal-backdrop" id="buildSettingsModal">
@@ -677,9 +734,11 @@
   <div class="modal" role="dialog" aria-labelledby="dropSettingsTitle">
     <h3 id="dropSettingsTitle">Drop settings</h3>
     <p class="hint">
-      A drop fires on a sudden loudness/bass slam, scaled automatically by the Genre Agent.
+      <strong>Genre Profile Layer</strong> (top two sliders) adapts per genre &amp; learns your tweaks.
+      <strong>Fast Track Layer</strong> (below) stays locked to instant track transients regardless of genre shifts.
     </p>
     <div class="settings">
+      <div class="seg-label">Genre Profile Layer (learned per genre)</div>
       <label class="slider-label">Drop intensity
         <span class="field-help">Higher fires DROP on smaller slams.</span>
         <input type="range" id="rngDropIntensity" min="0" max="100" step="1" value="55">
@@ -690,6 +749,7 @@
         <input type="range" id="rngDropHold" min="2" max="60" step="1" value="10">
         <span class="slider-val" id="lblDropHold">10 s</span>
       </label>
+      <div class="seg-label" style="margin-top:8px">Fast Track Layer (global real-time sensing)</div>
       <label class="slider-label">Rise window
         <input type="range" id="rngDropWindow" min="0.15" max="1.5" step="0.05" value="0.5">
         <span class="slider-val" id="lblDropWindow">0.50 s</span>
@@ -871,7 +931,7 @@ const CH_CHIPS = [
   {ch: 7, name: "drop_hit"},
   {ch: 8, name: "4/4"},
   {ch: 9, name: "bpm_rate"},
-  {ch: 10, name: "drop_mom"},
+  {ch: 10, name: "fx_size"},
 ];
 const BPM_RATE_LABELS = {32: "1/8", 64: "1/4", 128: "1/2", 255: "1/1"};
 const BPM_STEPS = ["eighth", "quarter", "half", "full"];
@@ -906,6 +966,9 @@ let layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
 let dragBoxId = null;
 let dragPaneId = null;
 let layoutSaveTimer = null;
+let inlineBpmHoldUntil = 0;
+let inlineSizeHoldUntil = 0;
+let currentArchetypeKey = "house_tech";
 
 for (const {ch, name} of CH_CHIPS) {
   const chip = document.createElement("div");
@@ -979,8 +1042,19 @@ function update(s) {
   badge.textContent = backend.toUpperCase();
   badge.className = "genre-badge " + (backend === "onnx" ? "onnx" : (backend === "manual" ? "manual" : ""));
   $("genreArchetype").textContent = s.archetype_label || s.style || "Adaptive";
+  if (s.archetype) currentArchetypeKey = s.archetype;
   const tags = s.genre_tags || "";
   $("genreTags").textContent = tags && tags !== s.archetype_label ? `— ${tags}` : "";
+  const learnedEl = $("genreLearnedBadge");
+  if (learnedEl) {
+    const edits = Number(s.genre_edits || 0);
+    if (edits > 0) {
+      learnedEl.hidden = false;
+      learnedEl.textContent = `learned (${edits})`;
+    } else {
+      learnedEl.hidden = true;
+    }
+  }
 
   const evPct = (v, need) => {
     const n = Number(need) > 0 ? Number(need) : 1;
@@ -1008,10 +1082,15 @@ function update(s) {
   $("mBpmRate").style.width = pct(br, 255);
   const nearest = [32, 64, 128, 255].reduce((a, b) => Math.abs(b - br) < Math.abs(a - br) ? b : a);
   $("vBpmRate").textContent = `${Math.round(br)} (${BPM_RATE_LABELS[nearest] || "?"})`;
+  const fxSz = Number(s.fx_size ?? 0);
+  $("mFxSize").style.width = pct(fxSz, 255);
+  $("vFxSize").textContent = String(Math.round(fxSz));
   $("mRamp").style.width = pct(s.ramp, 1);
   $("vRamp").textContent = Math.round(s.ramp * 255);
 
   for (const {ch} of CH_CHIPS) $("dmx" + (ch - 1)).textContent = s.dmx[ch - 1] ?? 0;
+
+  if (s.policy) syncLivePolicyControls(s.policy);
 
   if (s.meta) $("meta").innerHTML = `${escapeHtml(s.meta.source || "")}<br>${escapeHtml(s.meta.artnet || "")}`;
 
@@ -1477,6 +1556,91 @@ function setBpmDivider(minName, maxName) {
   syncBpmDivider();
 }
 
+function syncFxSizeRange(which) {
+  let lo = Number($("rngSizeLo").value);
+  let hi = Number($("rngSizeHi").value);
+  if (lo > hi) {
+    if (which === "lo") hi = lo;
+    else lo = hi;
+    $("rngSizeLo").value = String(lo);
+    $("rngSizeHi").value = String(hi);
+  }
+  $("rngSizeLo").style.zIndex = which === "lo" ? "4" : "2";
+  $("rngSizeHi").style.zIndex = which === "hi" ? "4" : "3";
+  const fill = $("fxSizeFill");
+  fill.style.left = (lo / 255 * 100) + "%";
+  fill.style.width = ((hi - lo) / 255 * 100) + "%";
+  $("lblFxSizeRange").textContent = `${lo} – ${hi}`;
+}
+
+function setFxSizeRange(baseVal, maxVal) {
+  let lo = Math.max(0, Math.min(255, Math.round(Number(baseVal ?? 100))));
+  let hi = Math.max(16, Math.min(255, Math.round(Number(maxVal ?? 235))));
+  if (lo > hi) lo = hi;
+  $("rngSizeLo").value = String(lo);
+  $("rngSizeHi").value = String(hi);
+  syncFxSizeRange();
+}
+
+function syncFxSizeModalLabels() {
+  let lo = Number($("rngModalSizeBase").value);
+  let hi = Number($("rngModalSizeMax").value);
+  if (lo > hi) {
+    hi = lo;
+    $("rngModalSizeMax").value = String(hi);
+  }
+  $("lblModalSizeBase").textContent = String(lo);
+  $("lblModalSizeMax").textContent = String(hi);
+  $("lblSizeReactivity").textContent = Number($("rngSizeReactivity").value) + "%";
+}
+
+function anyModalOpen() {
+  return !!document.querySelector(".modal-backdrop.open");
+}
+
+function syncLivePolicyControls(pol) {
+  const now = performance.now();
+  const active = document.activeElement;
+  if (
+    now > inlineBpmHoldUntil
+    && active !== $("rngBpmLo")
+    && active !== $("rngBpmHi")
+    && active !== $("rngBpmDecay")
+  ) {
+    if (pol.bpm_rate_min && pol.bpm_rate_max) setBpmDivider(pol.bpm_rate_min, pol.bpm_rate_max);
+    if (pol.bpm_rate_decay != null) {
+      $("rngBpmDecay").value = String(pol.bpm_rate_decay);
+      syncDecayLabel();
+    }
+  }
+  if (
+    now > inlineSizeHoldUntil
+    && active !== $("rngSizeLo")
+    && active !== $("rngSizeHi")
+  ) {
+    if (pol.fx_size_base != null && pol.fx_size_max != null) {
+      setFxSizeRange(pol.fx_size_base, pol.fx_size_max);
+    }
+  }
+  if (!anyModalOpen()) {
+    if (pol.fx_size_base != null) $("rngModalSizeBase").value = String(Math.round(pol.fx_size_base));
+    if (pol.fx_size_max != null) $("rngModalSizeMax").value = String(Math.round(pol.fx_size_max));
+    if (pol.fx_size_reactivity != null) $("rngSizeReactivity").value = String(Math.round(Number(pol.fx_size_reactivity) * 100));
+    syncFxSizeModalLabels();
+    if (pol.build_intensity != null) $("rngBuildIntensity").value = String(Math.round(Number(pol.build_intensity) * 100));
+    if (pol.build_decay_seconds != null) $("rngBuildDecay").value = String(pol.build_decay_seconds);
+    syncBuildLabels();
+    if (pol.drop_intensity != null) $("rngDropIntensity").value = String(Math.round(Number(pol.drop_intensity) * 100));
+    if (pol.drop_hold_seconds != null) $("rngDropHold").value = String(Math.round(Number(pol.drop_hold_seconds)));
+    syncDropSettingsLabels();
+    if (pol.breakdown_intensity != null) $("rngBreakdownIntensity").value = String(Math.round(Number(pol.breakdown_intensity) * 100));
+    if (pol.breakdown_beats != null) $("rngBreakdownBeats").value = String(pol.breakdown_beats);
+    syncBreakdownLabels();
+    if (pol.four_four_intensity != null) $("rngFourFourIntensity").value = String(Math.round(Number(pol.four_four_intensity) * 100));
+    syncFourFourLabels();
+  }
+}
+
 function fillModalForms(meta) {
   if (!meta) return;
   if (meta.build_intensity != null) $("rngBuildIntensity").value = String(Math.round(Number(meta.build_intensity) * 100));
@@ -1907,11 +2071,21 @@ function applyMetaToForm(meta, devices, interfaces) {
     $("rngBpmDecay").value = String(meta.bpm_rate_decay);
     syncDecayLabel();
   }
+  if (meta.fx_size_base != null || meta.fx_size_max != null) {
+    setFxSizeRange(meta.fx_size_base ?? 100, meta.fx_size_max ?? 235);
+    $("rngModalSizeBase").value = String(Math.round(meta.fx_size_base ?? 100));
+    $("rngModalSizeMax").value = String(Math.round(meta.fx_size_max ?? 235));
+  }
+  if (meta.fx_size_reactivity != null) {
+    $("rngSizeReactivity").value = String(Math.round(Number(meta.fx_size_reactivity) * 100));
+  }
+  syncFxSizeModalLabels();
   fillModalForms(meta);
   if (meta.noise_floor_db != null) setNoiseFloorUI(meta.noise_floor_db);
   setVizModeUI(meta.visualizer_mode || "auto");
   if (meta.style) $("selStyle").value = meta.style;
   if (meta.genre_mode) $("selGenreMode").value = meta.genre_mode;
+  if (meta.learning_enabled !== undefined) $("chkLearning").checked = !!meta.learning_enabled;
   if (meta.enabled !== undefined) setEnableUI(meta.enabled);
   if (meta.analyzing !== undefined) setAnalyzeUI(meta.analyzing);
   if (meta.visualizer !== undefined) setVisualizerUI(meta.visualizer);
@@ -1988,6 +2162,35 @@ $("selGenreMode").onchange = () => {
   postSettings({ genre_mode: $("selGenreMode").value }, "settingsNote", "Genre agent mode saved");
 };
 
+$("selStyle").onchange = () => {
+  postSettings({ style: $("selStyle").value }, "settingsNote", "Arrangement override saved");
+};
+
+$("chkLearning").onchange = () => {
+  postSettings({ learning_enabled: $("chkLearning").checked }, "settingsNote", "Profile learning updated");
+};
+
+$("btnResetGenre").onclick = async (ev) => {
+  const resetAll = !!ev.shiftKey;
+  const label = resetAll ? "ALL 8 genre profiles" : `learned tweaks for "${$("genreArchetype").textContent}"`;
+  if (!confirm(`Reset ${label} back to factory defaults?`)) return;
+  const note = $("settingsNote");
+  try {
+    const r = await fetch("/api/genre/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archetype: resetAll ? "all" : currentArchetypeKey }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "reset failed");
+    note.className = "settings-note ok";
+    note.textContent = d.message;
+  } catch (e) {
+    note.className = "settings-note err";
+    note.textContent = String(e.message || e);
+  }
+};
+
 $("selDevice").onchange = () => applyAudioInput();
 $("selInputChannel").onchange = () => applyAudioInput();
 
@@ -2000,9 +2203,39 @@ async function applyAudioInput() {
   }, "settingsNote", "Input switched");
 }
 
-$("rngBpmDecay").oninput = syncDecayLabel;
-$("rngBpmLo").oninput = () => syncBpmDivider("lo");
-$("rngBpmHi").oninput = () => syncBpmDivider("hi");
+let bpmSaveTimer = null;
+function scheduleBpmPolicySave() {
+  inlineBpmHoldUntil = performance.now() + 2200;
+  clearTimeout(bpmSaveTimer);
+  bpmSaveTimer = setTimeout(() => {
+    postSettings({
+      bpm_rate_min: BPM_STEPS[Number($("rngBpmLo").value)],
+      bpm_rate_max: BPM_STEPS[Number($("rngBpmHi").value)],
+      bpm_rate_decay: Number($("rngBpmDecay").value),
+    }, "settingsNote", "BPM divider learned");
+  }, 450);
+}
+
+let sizeSaveTimer = null;
+function scheduleSizePolicySave() {
+  inlineSizeHoldUntil = performance.now() + 2200;
+  clearTimeout(sizeSaveTimer);
+  sizeSaveTimer = setTimeout(() => {
+    postSettings({
+      fx_size_base: Number($("rngSizeLo").value),
+      fx_size_max: Number($("rngSizeHi").value),
+    }, "settingsNote", "FX size learned");
+  }, 450);
+}
+
+$("rngBpmDecay").oninput = () => { syncDecayLabel(); scheduleBpmPolicySave(); };
+$("rngBpmLo").oninput = () => { syncBpmDivider("lo"); scheduleBpmPolicySave(); };
+$("rngBpmHi").oninput = () => { syncBpmDivider("hi"); scheduleBpmPolicySave(); };
+$("rngSizeLo").oninput = () => { syncFxSizeRange("lo"); scheduleSizePolicySave(); };
+$("rngSizeHi").oninput = () => { syncFxSizeRange("hi"); scheduleSizePolicySave(); };
+$("rngModalSizeBase").oninput = syncFxSizeModalLabels;
+$("rngModalSizeMax").oninput = syncFxSizeModalLabels;
+$("rngSizeReactivity").oninput = syncFxSizeModalLabels;
 $("rngBuildIntensity").oninput = syncBuildLabels;
 $("rngBuildDecay").oninput = syncBuildLabels;
 $("rngDropIntensity").oninput = syncDropSettingsLabels;
@@ -2016,7 +2249,7 @@ $("rngBreakdownIntensity").oninput = syncBreakdownLabels;
 $("rngBreakdownBeats").oninput = syncBreakdownLabels;
 $("rngDropHitHold").oninput = syncDropHitLabels;
 $("rngDropHitFade").oninput = syncDropHitLabels;
-syncDecayLabel(); syncBpmDivider(); syncBuildLabels(); syncDropSettingsLabels(); syncFourFourLabels(); syncBreakdownLabels(); syncDropHitLabels();
+syncDecayLabel(); syncBpmDivider(); syncFxSizeRange(); syncFxSizeModalLabels(); syncBuildLabels(); syncDropSettingsLabels(); syncFourFourLabels(); syncBreakdownLabels(); syncDropHitLabels();
 
 async function postSettings(body, noteEl, okText) {
   const note = $(noteEl);
@@ -2045,6 +2278,7 @@ function wireModal(id, openBtn, cancelBtn) {
   $(cancelBtn).onclick = () => setModalOpen(id, false);
   $(id).addEventListener("click", ev => { if (ev.target === $(id)) setModalOpen(id, false); });
 }
+wireModal("fxSizeModal", "btnFxSizeSettings", "btnFxSizeCancel");
 wireModal("buildSettingsModal", "btnBuildSettings", "btnBuildSettingsCancel");
 wireModal("dropSettingsModal", "btnDropSettings", "btnDropSettingsCancel");
 wireModal("fourFourSettingsModal", "btnFourFourSettings", "btnFourFourSettingsCancel");
@@ -2054,6 +2288,17 @@ wireModal("serverSettingsModal", "btnServerSettings", "btnServerSettingsCancel")
 
 $("chkRebootEnabled").onchange = () => { $("rebootFields").disabled = !$("chkRebootEnabled").checked; };
 $("btnServerSettingsSave").onclick = () => postSettings(collectServerSettings(), "serverSettingsNote", "Server settings saved");
+$("btnFxSizeSave").onclick = () => {
+  inlineSizeHoldUntil = performance.now() + 1500;
+  const baseVal = Number($("rngModalSizeBase").value);
+  const maxVal = Math.max(baseVal, Number($("rngModalSizeMax").value));
+  setFxSizeRange(baseVal, maxVal);
+  postSettings({
+    fx_size_base: baseVal,
+    fx_size_max: maxVal,
+    fx_size_reactivity: Number($("rngSizeReactivity").value) / 100,
+  }, "fxSizeSettingsNote", "FX size settings saved");
+};
 $("btnBuildSettingsSave").onclick = () => postSettings({
   build_intensity: Number($("rngBuildIntensity").value) / 100,
   build_decay_seconds: Number($("rngBuildDecay").value),
@@ -2126,10 +2371,8 @@ $("btnApply").onclick = async () => {
       port: Number($("inPort").value),
       universe: Number($("inUni").value),
       priority: Number($("inPriority").value),
-      bpm_rate_min: BPM_STEPS[Number($("rngBpmLo").value)],
-      bpm_rate_max: BPM_STEPS[Number($("rngBpmHi").value)],
-      bpm_rate_decay: Number($("rngBpmDecay").value),
       genre_mode: $("selGenreMode").value,
+      learning_enabled: $("chkLearning").checked,
       style: $("selStyle").value,
     };
     if (!net.local && $("selMode").value === "unicast") body.ip = $("inIp").value.trim();

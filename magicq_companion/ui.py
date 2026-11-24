@@ -1,9 +1,9 @@
-"""Web dashboard: broadcasts live audio, genre, and DMX state over WebSocket,
-with runtime control of audio input, Art-Net/sACN output, Genre Agent mode,
-and unattended server settings.
+"""Web dashboard: broadcasts live audio, genre, policy, and DMX state over WebSocket,
+with Two-Layer control (Genre Policy Layer with online profile learning +
+Fast Track Reactivity Layer) and unattended host management.
 
 Uses `aiohttp` when installed, with a built-in zero-dependency `asyncio`
-HTTP + RFC 6455 WebSocket fallback so the dashboard works on minimal hosts too.
+HTTP + RFC 6455 WebSocket fallback.
 """
 
 from __future__ import annotations
@@ -22,8 +22,10 @@ import time
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from .config import (
+    ARCHETYPE_NAMES,
     BPM_RATE_NAMES,
     GENRE_MODES,
     INPUT_CHANNEL_CHOICES,
@@ -41,6 +43,7 @@ from .config import (
     try_reboot_time,
 )
 from .control_channels import CONTROL_CHANNEL_NAMES, DEFAULT_RENUMBER
+from .genre_profiles import ARCHETYPE_LABELS, GenrePolicy
 from .output import (
     OUTPUT_PROTOCOLS,
     allowed_modes,
@@ -49,7 +52,7 @@ from .output import (
     describe_output,
     list_ipv4_interfaces,
 )
-from .paths import default_layout_path, static_dir
+from .paths import default_genre_profiles_path, default_layout_path, static_dir
 from .pipeline import Bridge
 from .schedule import apply_host_schedule
 
@@ -96,6 +99,7 @@ class _Manager:
         self.duration = duration
         self.config_path = config_path
         self.layout_path = default_layout_path(config_path)
+        self.profiles_path = default_genre_profiles_path(config_path)
         self.simulate = simulate
 
         self.state_lock = threading.Lock()
@@ -129,6 +133,7 @@ class _Manager:
             pace=self.pace,
             duration=self.duration,
             async_genre=not (self.simulate and not self.pace),
+            profiles_path=self.profiles_path,
         )
         self.bridge.enabled = self.enabled
         self.bridge.analyzing = self.analyzing
@@ -194,6 +199,9 @@ class _Manager:
         ev = b.tracker.evidence()
         live = bool(b.signal_live)
         self._record_section(b)
+        arch_key = str(ev.get("archetype") or "house_tech")
+        edits_map = b.profile_store.edit_counts()
+        policy_dict = b.policy.to_ui_dict() if self.cfg.genre.enabled else None
         with self.state_lock:
             self.state.update(
                 t=round(b.t, 2),
@@ -208,6 +216,7 @@ class _Manager:
                 melody=round(f.melody_score, 3),
                 pace=round(f.pace_score, 3),
                 bpm_rate=round(f.bpm_rate),
+                fx_size=round(f.fx_size),
                 ramp=round(b.tracker.build_progress, 3),
                 beat_age=round(f.seconds_since_beat, 3),
                 rms_db=round(f.rms_db, 1),
@@ -226,6 +235,10 @@ class _Manager:
                 quiet_s=round(b.quiet_s, 1),
                 log_seq=self.log_seq,
                 genre_mode=self.cfg.genre.mode,
+                learning_enabled=bool(self.cfg.genre.learning_enabled),
+                genre_edits=int(edits_map.get(arch_key, 0)),
+                genre_total_edits=sum(edits_map.values()),
+                policy=policy_dict,
                 **ev,
             )
 
@@ -247,6 +260,7 @@ class _Manager:
                 "held": 0.0,
                 "bpm": round(b.features.bpm, 1),
                 "pace": round(b.features.pace_score, 2),
+                "fx_size": int(round(b.features.fx_size)),
                 "archetype": b.features.archetype_label,
                 "energy": round(b.features.energy_norm, 2),
                 "build": round(b.features.build_score, 2),
@@ -289,6 +303,37 @@ class _Manager:
                 out.append(rec)
         return out
 
+    def genre_profiles_snapshot(self) -> dict[str, Any]:
+        if self.bridge is None:
+            return {"profiles": {}, "total_edits": 0}
+        return {
+            "profiles": self.bridge.profile_store.all_profiles_summary(),
+            "total_edits": self.bridge.profile_store.total_edits(),
+        }
+
+    def reset_genre_profile(self, archetype: str | None) -> str:
+        with self.ctl_lock:
+            if self.bridge is None:
+                return "Bridge not running"
+            target = str(archetype or "current").strip().lower()
+            if target == "current":
+                target = self.bridge.genre.archetype
+            if target != "all" and target not in ARCHETYPE_NAMES:
+                raise ValueError(f"unknown archetype: {target}")
+            self.bridge.profile_store.reset_profiles(target)
+            probs = self.bridge.genre_agent.current_probabilities()
+            self.bridge.policy = self.bridge.profile_store.resolve(probs)
+            with self.state_lock:
+                self.state["policy"] = self.bridge.policy.to_ui_dict()
+                self.state["genre_edits"] = self.bridge.profile_store.edit_counts().get(
+                    self.bridge.genre.archetype, 0
+                )
+                self.state["genre_total_edits"] = self.bridge.profile_store.total_edits()
+                self.state["meta"] = self._meta()
+            if target == "all":
+                return "Reset all 8 genre profiles to factory defaults"
+            return f"Reset {ARCHETYPE_LABELS.get(target, target)} profile to factory defaults"
+
     # ------------------------------------------------------------------
 
     def _meta(self) -> dict:
@@ -299,6 +344,13 @@ class _Manager:
             self.bridge.genre_agent.backend_name
             if self.bridge is not None
             else ("auto" if self.cfg.genre.enabled else "off")
+        )
+        policy: GenrePolicy | None = (
+            self.bridge.policy if (self.bridge is not None and self.cfg.genre.enabled) else None
+        )
+        pol_ui = policy.to_ui_dict() if policy is not None else {}
+        edits_total = (
+            self.bridge.profile_store.total_edits() if self.bridge is not None else 0
         )
         return {
             "source": self.source_desc,
@@ -314,16 +366,28 @@ class _Manager:
             "port": self.cfg.artnet.port,
             "universe": self.cfg.artnet.universe,
             "priority": self.cfg.artnet.priority,
-            "bpm_rate_min": br.min,
-            "bpm_rate_max": br.max,
-            "bpm_rate_decay": br.decay_seconds,
+            "bpm_rate_safety_min": br.min,
+            "bpm_rate_safety_max": br.max,
+            "bpm_rate_min": pol_ui.get("bpm_rate_min", br.min),
+            "bpm_rate_max": pol_ui.get("bpm_rate_max", br.max),
+            "bpm_rate_decay": pol_ui.get("bpm_rate_decay", br.decay_seconds),
+            "fx_size_base": pol_ui.get("fx_size_base", self.cfg.fx_size.base),
+            "fx_size_max": pol_ui.get("fx_size_max", self.cfg.fx_size.max),
+            "fx_size_reactivity": pol_ui.get("fx_size_reactivity", self.cfg.fx_size.reactivity),
             "genre_enabled": bool(self.cfg.genre.enabled),
             "genre_mode": self.cfg.genre.mode,
+            "learning_enabled": bool(self.cfg.genre.learning_enabled),
             "genre_backend": backend,
-            "build_intensity": self.cfg.detection.build_intensity,
-            "drop_intensity": self.cfg.detection.drop_intensity,
-            "build_decay_seconds": self.cfg.detection.build_decay_seconds,
-            "drop_hold_seconds": self.cfg.detection.drop_hold_seconds,
+            "genre_total_edits": edits_total,
+            "policy": pol_ui,
+            "build_intensity": pol_ui.get("build_intensity", self.cfg.detection.build_intensity),
+            "drop_intensity": pol_ui.get("drop_intensity", self.cfg.detection.drop_intensity),
+            "build_decay_seconds": pol_ui.get(
+                "build_decay_seconds", self.cfg.detection.build_decay_seconds
+            ),
+            "drop_hold_seconds": pol_ui.get(
+                "drop_hold_seconds", self.cfg.detection.drop_hold_seconds
+            ),
             "drop_rise_window": self.cfg.detection.drop_rise_window,
             "drop_rise": self.cfg.detection.drop_rise,
             "drop_energy_jump": self.cfg.detection.drop_energy_jump,
@@ -332,10 +396,16 @@ class _Manager:
             "drop_smooth_seconds": self.cfg.detection.drop_smooth_seconds,
             "drop_from_groove": bool(self.cfg.detection.drop_from_groove),
             "drop_use_onset": bool(self.cfg.detection.drop_use_onset),
-            "four_four_intensity": self.cfg.detection.four_four_intensity,
+            "four_four_intensity": pol_ui.get(
+                "four_four_intensity", self.cfg.detection.four_four_intensity
+            ),
             "four_four_smooth_seconds": self.cfg.detection.four_four_smooth_seconds,
-            "breakdown_intensity": self.cfg.detection.breakdown_intensity,
-            "breakdown_beats": self.cfg.detection.breakdown_beats,
+            "breakdown_intensity": pol_ui.get(
+                "breakdown_intensity", self.cfg.detection.breakdown_intensity
+            ),
+            "breakdown_beats": pol_ui.get(
+                "breakdown_beats", self.cfg.detection.breakdown_beats
+            ),
             "drop_hit_seconds": self.cfg.detection.drop_hit_seconds,
             "drop_hit_fade_seconds": self.cfg.detection.drop_hit_fade_seconds,
             "style": self.cfg.detection.style,
@@ -480,6 +550,9 @@ class _Manager:
         bpm_rate_min: str | None = None,
         bpm_rate_max: str | None = None,
         bpm_rate_decay: float | None = None,
+        fx_size_base: int | None = None,
+        fx_size_max: int | None = None,
+        fx_size_reactivity: float | None = None,
         intensity: float | None = None,
         build_intensity: float | None = None,
         drop_intensity: float | None = None,
@@ -494,6 +567,7 @@ class _Manager:
         drop_sensing: dict | None = None,
         style: str | None = None,
         genre_mode: str | None = None,
+        learning_enabled: bool | None = None,
         silence_gate: bool | None = None,
         noise_floor_db: float | None = None,
         visualizer_mode: str | None = None,
@@ -558,57 +632,20 @@ class _Manager:
                 cfg.artnet.priority = priority
                 audio_changed = True
 
-            bpm_changed = False
-            if bpm_rate_min is not None and bpm_rate_min != cfg.bpm_rate.min:
-                cfg.bpm_rate.min = bpm_rate_min
-                bpm_changed = True
-            if bpm_rate_max is not None and bpm_rate_max != cfg.bpm_rate.max:
-                cfg.bpm_rate.max = bpm_rate_max
-                bpm_changed = True
-            if bpm_rate_decay is not None and bpm_rate_decay != cfg.bpm_rate.decay_seconds:
-                cfg.bpm_rate.decay_seconds = bpm_rate_decay
-                bpm_changed = True
-
             if intensity is not None:
                 if build_intensity is None:
                     build_intensity = intensity
                 if drop_intensity is None:
                     drop_intensity = intensity
 
-            build_changed = False
-            if (
-                build_intensity is not None
-                and build_intensity != cfg.detection.build_intensity
+            learning_flag_changed = False
+            if learning_enabled is not None and bool(learning_enabled) != bool(
+                cfg.genre.learning_enabled
             ):
-                cfg.detection.build_intensity = build_intensity
-                build_changed = True
-            if (
-                build_decay_seconds is not None
-                and build_decay_seconds != cfg.detection.build_decay_seconds
-            ):
-                cfg.detection.build_decay_seconds = build_decay_seconds
-                build_changed = True
-
-            drop_changed = False
-            if (
-                drop_intensity is not None
-                and drop_intensity != cfg.detection.drop_intensity
-            ):
-                cfg.detection.drop_intensity = drop_intensity
-                drop_changed = True
-            if (
-                drop_hold_seconds is not None
-                and drop_hold_seconds != cfg.detection.drop_hold_seconds
-            ):
-                cfg.detection.drop_hold_seconds = drop_hold_seconds
-                drop_changed = True
-
-            sensing_changed = self._apply_drop_sensing(cfg.detection, drop_sensing)
-
-            style_changed = False
-            if style is not None and style != cfg.detection.style:
-                cfg.detection.style = style
-                style_changed = True
+                cfg.genre.learning_enabled = bool(learning_enabled)
+                learning_flag_changed = True
+                if self.bridge is not None:
+                    self.bridge.profile_store.learning_enabled = cfg.genre.learning_enabled
 
             genre_changed = False
             if genre_mode is not None:
@@ -619,6 +656,84 @@ class _Manager:
                     if self.bridge is not None:
                         self.bridge.genre_agent.cfg.mode = coerced_gm
                         self.bridge.genre = self.bridge.genre_agent.refresh_mode()
+                        self.bridge.policy = self.bridge.profile_store.resolve(
+                            self.bridge.genre_agent.current_probabilities()
+                        )
+
+            # ----------------------------------------------------------
+            # Layer 1: Genre Policy & Online Profile Learning
+            # (strictly separate from Layer 2 fast track reactivity!)
+            # ----------------------------------------------------------
+            policy_updates: dict[str, Any] = {}
+            for key, val in (
+                ("bpm_rate_min", bpm_rate_min),
+                ("bpm_rate_max", bpm_rate_max),
+                ("bpm_rate_decay", bpm_rate_decay),
+                ("fx_size_base", fx_size_base),
+                ("fx_size_max", fx_size_max),
+                ("fx_size_reactivity", fx_size_reactivity),
+                ("build_intensity", build_intensity),
+                ("build_decay_seconds", build_decay_seconds),
+                ("drop_intensity", drop_intensity),
+                ("drop_hold_seconds", drop_hold_seconds),
+                ("breakdown_intensity", breakdown_intensity),
+                ("breakdown_beats", breakdown_beats),
+                ("four_four_intensity", four_four_intensity),
+            ):
+                if val is not None:
+                    policy_updates[key] = val
+
+            learned_credits: list[tuple[str, float]] = []
+            policy_changed = False
+            if policy_updates:
+                if cfg.genre.enabled and self.bridge is not None:
+                    probs = self.bridge.genre_agent.current_probabilities()
+                    new_policy, learned_credits = self.bridge.profile_store.learn_override(
+                        probs, policy_updates
+                    )
+                    self.bridge.policy = new_policy
+                    policy_changed = True
+
+                # Also update fallback config fields (without shrinking global
+                # bpm_rate outer safety bounds when genre agent is active!).
+                if not cfg.genre.enabled:
+                    if bpm_rate_min is not None:
+                        cfg.bpm_rate.min = bpm_rate_min
+                    if bpm_rate_max is not None:
+                        cfg.bpm_rate.max = bpm_rate_max
+                if bpm_rate_decay is not None:
+                    cfg.bpm_rate.decay_seconds = bpm_rate_decay
+                if fx_size_base is not None:
+                    cfg.fx_size.base = int(fx_size_base)
+                if fx_size_max is not None:
+                    cfg.fx_size.max = max(cfg.fx_size.base, int(fx_size_max))
+                if fx_size_reactivity is not None:
+                    cfg.fx_size.reactivity = float(fx_size_reactivity)
+                if build_intensity is not None:
+                    cfg.detection.build_intensity = build_intensity
+                if build_decay_seconds is not None:
+                    cfg.detection.build_decay_seconds = build_decay_seconds
+                if drop_intensity is not None:
+                    cfg.detection.drop_intensity = drop_intensity
+                if drop_hold_seconds is not None:
+                    cfg.detection.drop_hold_seconds = drop_hold_seconds
+                if breakdown_intensity is not None:
+                    cfg.detection.breakdown_intensity = breakdown_intensity
+                if breakdown_beats is not None:
+                    cfg.detection.breakdown_beats = breakdown_beats
+                if four_four_intensity is not None:
+                    cfg.detection.four_four_intensity = four_four_intensity
+                policy_changed = True
+
+            # ----------------------------------------------------------
+            # Layer 2: Fast Track Reactivity Layer (in-place, zero reset)
+            # ----------------------------------------------------------
+            sensing_changed = self._apply_drop_sensing(cfg.detection, drop_sensing)
+
+            style_changed = False
+            if style is not None and style != cfg.detection.style:
+                cfg.detection.style = style
+                style_changed = True
 
             silence_changed = False
             if silence_gate is not None and bool(silence_gate) != bool(
@@ -649,33 +764,13 @@ class _Manager:
                 server_changed = True
                 schedule_changed = True
 
-            four_four_changed = False
-            if (
-                four_four_intensity is not None
-                and four_four_intensity != cfg.detection.four_four_intensity
-            ):
-                cfg.detection.four_four_intensity = four_four_intensity
-                four_four_changed = True
+            four_four_smooth_changed = False
             if (
                 four_four_smooth_seconds is not None
                 and four_four_smooth_seconds != cfg.detection.four_four_smooth_seconds
             ):
                 cfg.detection.four_four_smooth_seconds = four_four_smooth_seconds
-                four_four_changed = True
-
-            breakdown_changed = False
-            if (
-                breakdown_intensity is not None
-                and breakdown_intensity != cfg.detection.breakdown_intensity
-            ):
-                cfg.detection.breakdown_intensity = breakdown_intensity
-                breakdown_changed = True
-            if (
-                breakdown_beats is not None
-                and breakdown_beats != cfg.detection.breakdown_beats
-            ):
-                cfg.detection.breakdown_beats = breakdown_beats
-                breakdown_changed = True
+                four_four_smooth_changed = True
 
             drop_hit_changed = False
             if (
@@ -710,14 +805,12 @@ class _Manager:
                     device_changed,
                     channel_changed,
                     audio_changed,
-                    bpm_changed,
-                    build_changed,
-                    drop_changed,
+                    policy_changed,
                     sensing_changed,
                     style_changed,
                     genre_changed,
-                    four_four_changed,
-                    breakdown_changed,
+                    learning_flag_changed,
+                    four_four_smooth_changed,
                     drop_hit_changed,
                     input_changed,
                     silence_changed,
@@ -742,12 +835,20 @@ class _Manager:
                     old.blackout()
                     old.close()
 
-            if bpm_changed and self.bridge is not None:
+            if self.bridge is not None:
                 self.bridge.extractor.bpm_rate_cfg = cfg.bpm_rate
+                self.bridge.extractor.fx_size_cfg = cfg.fx_size
 
             with self.state_lock:
                 self.state["meta"] = self._meta()
                 self.state["genre_mode"] = cfg.genre.mode
+                self.state["learning_enabled"] = cfg.genre.learning_enabled
+                if self.bridge is not None and cfg.genre.enabled:
+                    self.state["policy"] = self.bridge.policy.to_ui_dict()
+                    self.state["genre_edits"] = self.bridge.profile_store.edit_counts().get(
+                        self.bridge.genre.archetype, 0
+                    )
+                    self.state["genre_total_edits"] = self.bridge.profile_store.total_edits()
             self._persist()
 
             parts = []
@@ -757,25 +858,36 @@ class _Manager:
                 parts.append(f"input channel -> {cfg.audio.input_channel}")
             if audio_changed:
                 parts.append("output " + describe_output(audio_output_cfg(cfg)))
-            if bpm_changed:
-                parts.append(
-                    f"BPM divider {cfg.bpm_rate.min}…{cfg.bpm_rate.max}, "
-                    f"decay {cfg.bpm_rate.decay_seconds:g}s"
-                )
             if genre_changed:
                 parts.append(f"genre agent {cfg.genre.mode}")
-            if build_changed:
+            if learning_flag_changed:
                 parts.append(
-                    f"build intensity {cfg.detection.build_intensity:.0%}, "
-                    f"decay {cfg.detection.build_decay_seconds:g}s"
+                    "profile learning on" if cfg.genre.learning_enabled else "profile learning off"
                 )
-            if drop_changed:
-                parts.append(
-                    f"drop intensity {cfg.detection.drop_intensity:.0%}, "
-                    f"length {cfg.detection.drop_hold_seconds:g}s"
-                )
+            if "bpm_rate_min" in policy_updates or "bpm_rate_max" in policy_updates or "bpm_rate_decay" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                lo_n = pol.bpm_rate_min_name if pol else cfg.bpm_rate.min
+                hi_n = pol.bpm_rate_max_name if pol else cfg.bpm_rate.max
+                dec_v = pol.bpm_rate_decay if pol else cfg.bpm_rate.decay_seconds
+                parts.append(f"BPM divider {lo_n}…{hi_n} ({dec_v:g}s decay)")
+            if "fx_size_base" in policy_updates or "fx_size_max" in policy_updates or "fx_size_reactivity" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                sb = int(round(pol.fx_size_base)) if pol else cfg.fx_size.base
+                sm = int(round(pol.fx_size_max)) if pol else cfg.fx_size.max
+                sr_v = pol.fx_size_reactivity if pol else cfg.fx_size.reactivity
+                parts.append(f"FX size {sb}–{sm} ({sr_v:.0%} react)")
+            if "build_intensity" in policy_updates or "build_decay_seconds" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                bi = pol.build_intensity if pol else cfg.detection.build_intensity
+                bd = pol.build_decay_seconds if pol else cfg.detection.build_decay_seconds
+                parts.append(f"build {bi:.0%}, decay {bd:g}s")
+            if "drop_intensity" in policy_updates or "drop_hold_seconds" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                di = pol.drop_intensity if pol else cfg.detection.drop_intensity
+                dh = pol.drop_hold_seconds if pol else cfg.detection.drop_hold_seconds
+                parts.append(f"drop {di:.0%}, hold {dh:g}s")
             if sensing_changed:
-                parts.append("drop sensing")
+                parts.append("fast drop sensing")
             if style_changed:
                 parts.append(f"style {cfg.detection.style}")
             if silence_changed:
@@ -793,16 +905,17 @@ class _Manager:
                     parts.append(f"reboot {days} at {cfg.server.reboot_time}")
                 else:
                     parts.append("scheduled reboot off")
-            if four_four_changed:
+            if "four_four_intensity" in policy_updates or four_four_smooth_changed:
+                pol = self.bridge.policy if self.bridge is not None else None
+                ffi = pol.four_four_intensity if pol else cfg.detection.four_four_intensity
                 parts.append(
-                    f"4/4 sensitivity {cfg.detection.four_four_intensity:.0%}, "
-                    f"smoothing {cfg.detection.four_four_smooth_seconds:g}s"
+                    f"4/4 sensitivity {ffi:.0%}, smoothing {cfg.detection.four_four_smooth_seconds:g}s"
                 )
-            if breakdown_changed:
-                parts.append(
-                    f"breakdown intensity {cfg.detection.breakdown_intensity:.0%}, "
-                    f"{cfg.detection.breakdown_beats:g} beats"
-                )
+            if "breakdown_intensity" in policy_updates or "breakdown_beats" in policy_updates:
+                pol = self.bridge.policy if self.bridge is not None else None
+                bdi = pol.breakdown_intensity if pol else cfg.detection.breakdown_intensity
+                bdb = pol.breakdown_beats if pol else cfg.detection.breakdown_beats
+                parts.append(f"breakdown {bdi:.0%}, {bdb:g} beats")
             if drop_hit_changed:
                 parts.append(
                     f"drop hit {cfg.detection.drop_hit_seconds:g}s, "
@@ -824,7 +937,13 @@ class _Manager:
                 except Exception as exc:
                     parts.append(f"schedule not installed: {exc}")
 
-            note = " and ".join(parts)
+            note = " and ".join(parts) if parts else "settings updated"
+            if learned_credits and cfg.genre.learning_enabled:
+                tags_str = " · ".join(
+                    f"{ARCHETYPE_LABELS.get(k, k)} {int(round(w * 100))}%"
+                    for k, w in learned_credits[:2]
+                )
+                note += f" [learned into {tags_str}]"
             if self.dry_run and audio_changed:
                 note += " (dry run: not sending)"
             return "Applied: " + note
@@ -864,6 +983,7 @@ class _Manager:
         text = path.read_text()
         text = self._ensure_section(text, "network")
         text = self._ensure_section(text, "genre")
+        text = self._ensure_section(text, "fx_size")
         text = self._ensure_section(text, "ui")
         text = self._upsert_in_section(text, "network", "interface", self.cfg.network.interface)
         text = self._upsert_in_section(text, "network", "ip", self.cfg.network.ip)
@@ -881,7 +1001,15 @@ class _Manager:
             text, "audio", "noise_floor_db", float(self.cfg.audio.noise_floor_db)
         )
         text = self._upsert_in_section(text, "genre", "enabled", bool(self.cfg.genre.enabled))
+        text = self._upsert_in_section(
+            text, "genre", "learning_enabled", bool(self.cfg.genre.learning_enabled)
+        )
         text = self._upsert_in_section(text, "genre", "mode", self.cfg.genre.mode)
+        text = self._upsert_in_section(text, "fx_size", "base", int(self.cfg.fx_size.base))
+        text = self._upsert_in_section(text, "fx_size", "max", int(self.cfg.fx_size.max))
+        text = self._upsert_in_section(
+            text, "fx_size", "reactivity", float(self.cfg.fx_size.reactivity)
+        )
         det = self.cfg.detection
         for key in (
             "build_intensity",
@@ -985,6 +1113,9 @@ def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, di
     bpm_rate_min = body.get("bpm_rate_min")
     bpm_rate_max = body.get("bpm_rate_max")
     bpm_rate_decay = body.get("bpm_rate_decay")
+    fx_size_base = body.get("fx_size_base")
+    fx_size_max = body.get("fx_size_max")
+    fx_size_reactivity = body.get("fx_size_reactivity")
     intensity = body.get("intensity")
     build_intensity = body.get("build_intensity")
     drop_intensity = body.get("drop_intensity")
@@ -998,6 +1129,7 @@ def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, di
     drop_sensing = body.get("drop_sensing")
     style = body.get("style")
     genre_mode = body.get("genre_mode")
+    learning_enabled = body.get("learning_enabled")
     silence_gate = body.get("silence_gate")
     noise_floor_db = body.get("noise_floor_db")
     visualizer_mode = body.get("visualizer_mode")
@@ -1093,6 +1225,8 @@ def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, di
         if raw_gm not in GENRE_MODES and coerced_gm == "auto" and raw_gm not in ("auto", "adaptive"):
             return 400, {"error": f"unknown genre_mode: {genre_mode}"}
         genre_mode = coerced_gm
+    if learning_enabled is not None:
+        learning_enabled = bool(learning_enabled)
     if silence_gate is not None:
         silence_gate = bool(silence_gate)
     if startup_output is not None:
@@ -1128,7 +1262,41 @@ def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, di
             return 400, {"error": "bpm_rate_decay must be a number"}
         if not 0.0 <= bpm_rate_decay <= 120.0:
             return 400, {"error": "bpm_rate_decay must be 0–120 seconds"}
+    if fx_size_base is not None:
+        try:
+            fx_size_base = int(round(float(fx_size_base)))
+        except (TypeError, ValueError):
+            return 400, {"error": "fx_size_base must be a number"}
+        if not 0 <= fx_size_base <= 255:
+            return 400, {"error": "fx_size_base must be 0–255"}
+    if fx_size_max is not None:
+        try:
+            fx_size_max = int(round(float(fx_size_max)))
+        except (TypeError, ValueError):
+            return 400, {"error": "fx_size_max must be a number"}
+        if not 16 <= fx_size_max <= 255:
+            return 400, {"error": "fx_size_max must be 16–255"}
+    if fx_size_reactivity is not None:
+        try:
+            fx_size_reactivity = float(fx_size_reactivity)
+        except (TypeError, ValueError):
+            return 400, {"error": "fx_size_reactivity must be a number"}
+        if not 0.0 <= fx_size_reactivity <= 1.0:
+            return 400, {"error": "fx_size_reactivity must be 0–1"}
 
+    validated_floats: dict[str, float | None] = {
+        "intensity": None,
+        "build_intensity": None,
+        "drop_intensity": None,
+        "build_decay_seconds": None,
+        "drop_hold_seconds": None,
+        "four_four_intensity": None,
+        "four_four_smooth_seconds": None,
+        "breakdown_intensity": None,
+        "breakdown_beats": None,
+        "drop_hit_seconds": None,
+        "drop_hit_fade_seconds": None,
+    }
     for field_name, val_obj, lo_v, hi_v in (
         ("intensity", intensity, 0.0, 1.0),
         ("build_intensity", build_intensity, 0.0, 1.0),
@@ -1149,41 +1317,7 @@ def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, di
                 return 400, {"error": f"{field_name} must be a number"}
             if not lo_v <= fval <= hi_v:
                 return 400, {"error": f"{field_name} must be {lo_v:g}–{hi_v:g}"}
-            locals_map = {
-                "intensity": "intensity",
-                "build_intensity": "build_intensity",
-                "drop_intensity": "drop_intensity",
-                "build_decay_seconds": "build_decay_seconds",
-                "drop_hold_seconds": "drop_hold_seconds",
-                "four_four_intensity": "four_four_intensity",
-                "four_four_smooth_seconds": "four_four_smooth_seconds",
-                "breakdown_intensity": "breakdown_intensity",
-                "breakdown_beats": "breakdown_beats",
-                "drop_hit_seconds": "drop_hit_seconds",
-                "drop_hit_fade_seconds": "drop_hit_fade_seconds",
-            }
-            if locals_map[field_name] == "intensity":
-                intensity = fval
-            elif locals_map[field_name] == "build_intensity":
-                build_intensity = fval
-            elif locals_map[field_name] == "drop_intensity":
-                drop_intensity = fval
-            elif locals_map[field_name] == "build_decay_seconds":
-                build_decay_seconds = fval
-            elif locals_map[field_name] == "drop_hold_seconds":
-                drop_hold_seconds = fval
-            elif locals_map[field_name] == "four_four_intensity":
-                four_four_intensity = fval
-            elif locals_map[field_name] == "four_four_smooth_seconds":
-                four_four_smooth_seconds = fval
-            elif locals_map[field_name] == "breakdown_intensity":
-                breakdown_intensity = fval
-            elif locals_map[field_name] == "breakdown_beats":
-                breakdown_beats = fval
-            elif locals_map[field_name] == "drop_hit_seconds":
-                drop_hit_seconds = fval
-            elif locals_map[field_name] == "drop_hit_fade_seconds":
-                drop_hit_fade_seconds = fval
+            validated_floats[field_name] = fval
 
     if noise_floor_db is not None:
         try:
@@ -1206,11 +1340,14 @@ def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, di
             bpm_rate_min=bpm_rate_min,
             bpm_rate_max=bpm_rate_max,
             bpm_rate_decay=bpm_rate_decay,
-            intensity=intensity,
-            build_intensity=build_intensity,
-            drop_intensity=drop_intensity,
-            build_decay_seconds=build_decay_seconds,
-            drop_hold_seconds=drop_hold_seconds,
+            fx_size_base=fx_size_base,
+            fx_size_max=fx_size_max,
+            fx_size_reactivity=fx_size_reactivity,
+            intensity=validated_floats["intensity"],
+            build_intensity=validated_floats["build_intensity"],
+            drop_intensity=validated_floats["drop_intensity"],
+            build_decay_seconds=validated_floats["build_decay_seconds"],
+            drop_hold_seconds=validated_floats["drop_hold_seconds"],
             protocol=protocol,
             mode=mode,
             port=port,
@@ -1220,15 +1357,16 @@ def _validate_and_apply_settings(manager: _Manager, body: dict) -> tuple[int, di
             drop_sensing=drop_sensing,
             style=style,
             genre_mode=genre_mode,
+            learning_enabled=learning_enabled,
             silence_gate=silence_gate,
             noise_floor_db=noise_floor_db,
             visualizer_mode=visualizer_mode,
-            four_four_intensity=four_four_intensity,
-            four_four_smooth_seconds=four_four_smooth_seconds,
-            breakdown_intensity=breakdown_intensity,
-            breakdown_beats=breakdown_beats,
-            drop_hit_seconds=drop_hit_seconds,
-            drop_hit_fade_seconds=drop_hit_fade_seconds,
+            four_four_intensity=validated_floats["four_four_intensity"],
+            four_four_smooth_seconds=validated_floats["four_four_smooth_seconds"],
+            breakdown_intensity=validated_floats["breakdown_intensity"],
+            breakdown_beats=validated_floats["breakdown_beats"],
+            drop_hit_seconds=validated_floats["drop_hit_seconds"],
+            drop_hit_fade_seconds=validated_floats["drop_hit_fade_seconds"],
             startup_output=startup_output,
             reboot_enabled=reboot_enabled,
             reboot_time=reboot_time,
@@ -1274,6 +1412,12 @@ def _dispatch_get_sync(manager: _Manager, path: str) -> tuple[int, str, bytes]:
             200,
             "application/json",
             json.dumps({"sections": manager.sections(), "seq": manager.log_seq}).encode(),
+        )
+    if path == "/api/genre/profiles":
+        return (
+            200,
+            "application/json",
+            json.dumps(manager.genre_profiles_snapshot()).encode(),
         )
     if path == "/api/layout":
         return (
@@ -1376,6 +1520,13 @@ def _dispatch_post_sync(manager: _Manager, path: str, raw_body: bytes) -> tuple[
     if not isinstance(body, dict):
         return 400, {"error": "JSON body must be an object"}
 
+    if path == "/api/genre/reset":
+        try:
+            msg = manager.reset_genre_profile(body.get("archetype"))
+        except ValueError as exc:
+            return 400, {"error": str(exc)}
+        return 200, {"ok": True, "message": msg}
+
     if path == "/api/layout":
         layout_data = body.get("layout", body)
         if not isinstance(layout_data, dict):
@@ -1428,7 +1579,6 @@ def _ws_encode_text(text: str) -> bytes:
 
 
 async def _ws_drain_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Drain incoming WebSocket control frames (Ping/Close) until EOF."""
     try:
         while True:
             hdr = await reader.readexactly(2)
@@ -1443,11 +1593,11 @@ async def _ws_drain_client(reader: asyncio.StreamReader, writer: asyncio.StreamW
             payload = await reader.readexactly(length) if length else b""
             if masked and payload:
                 payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
-            if opcode == 0x8:  # Close
+            if opcode == 0x8:
                 writer.write(b"\x88\x00")
                 await writer.drain()
                 break
-            if opcode == 0x9:  # Ping -> Pong
+            if opcode == 0x9:
                 pong_len = min(len(payload), 125)
                 writer.write(bytes((0x8A, pong_len)) + payload[:pong_len])
                 await writer.drain()
@@ -1483,7 +1633,6 @@ async def _run_stdlib_server(manager: _Manager, host: str, port: int) -> None:
                 k, v = line.split(":", 1)
                 headers[k.strip().lower()] = v.strip()
 
-        # RFC 6455 WebSocket upgrade on /ws
         if (
             method == "GET"
             and path == "/ws"
@@ -1607,8 +1756,10 @@ def build_aiohttp_app(manager: _Manager):
     app.router.add_get("/devices", get_route)
     app.router.add_get("/api/config", get_route)
     app.router.add_get("/api/sections", get_route)
+    app.router.add_get("/api/genre/profiles", get_route)
     app.router.add_get("/api/layout", get_route)
     app.router.add_post("/api/layout", post_route)
+    app.router.add_post("/api/genre/reset", post_route)
     app.router.add_post("/settings", post_route)
     app.router.add_post("/enable", post_route)
     app.router.add_post("/reboot", post_route)

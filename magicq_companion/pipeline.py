@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import numpy as np
 
@@ -13,15 +14,19 @@ from .config import Config
 from .dmx import build_frame
 from .features import FeatureExtractor, Features
 from .genre_agent import GenreAgent, GenreControlVector
+from .genre_profiles import GenrePolicy, GenreProfileStore
 from .output import DmxSender
 from .state_machine import SectionTracker
 
 
 class Bridge:
-    """Consumes audio blocks, runs genre + DSP analysis, and emits DMX frames.
+    """Consumes audio blocks, runs Two-Layer genre + track DSP, and emits DMX.
 
-    After each processed block the current state is available on the
-    instance: `t`, `features`, `tracker`, `genre`, and `dmx`.
+    Layer 1 (`GenreProfileStore` -> `GenrePolicy`) drives slow genre-dependent
+    settings and learns from user tweaks in `genre_profiles.json`.
+    Layer 2 (`FeatureExtractor` & `SectionTracker`) runs fast 12 ms hop-level
+    reactivity (`beat_pulse`, `drop_hit`, fast rises, `fx_size` surges) without
+    ever being reset or slowed down by Layer 1 changes.
     """
 
     def __init__(
@@ -33,6 +38,7 @@ class Bridge:
         duration: float | None = None,
         *,
         async_genre: bool = True,
+        profiles_path: Path | None = None,
     ) -> None:
         self.cfg = cfg
         self.blocks = blocks
@@ -49,6 +55,7 @@ class Bridge:
             cfg.detection,
             cfg.build_score,
             cfg.bpm_rate,
+            cfg.fx_size,
             noise_floor_db=cfg.audio.noise_floor_db,
         )
         self.tracker = SectionTracker(cfg.detection, self.extractor.fps)
@@ -57,7 +64,14 @@ class Bridge:
             sr,
             async_worker=async_genre,
         )
+        self.profile_store = GenreProfileStore(
+            profiles_path,
+            learning_enabled=cfg.genre.learning_enabled,
+        )
         self.genre: GenreControlVector = self.genre_agent.control_vector()
+        self.policy: GenrePolicy = self.profile_store.resolve(
+            self.genre_agent.current_probabilities()
+        )
         self.dmx = bytearray(512)
 
         self.t = 0.0
@@ -69,6 +83,11 @@ class Bridge:
         self._music_s = 0.0
         self._was_sending = True
         self._frame_idx = 0
+
+    def active_policy(self) -> GenrePolicy | None:
+        if not self.cfg.genre.enabled:
+            return None
+        return self.policy
 
     def _consume_stream(
         self,
@@ -83,10 +102,20 @@ class Bridge:
             self.t += self.dt
             if self.analyzing:
                 genre_vec = self.genre_agent.control_vector()
+                if self.cfg.genre.enabled:
+                    self.policy = self.profile_store.resolve(
+                        self.genre_agent.current_probabilities()
+                    )
+                    policy_for_hop: GenrePolicy | None = self.policy
+                else:
+                    policy_for_hop = None
+
                 self.features = self.extractor.process(
                     block,
                     genre=genre_vec,
+                    policy=policy_for_hop,
                     section=self.tracker.state.value,
+                    build_progress=self.tracker.build_progress,
                 )
                 self.genre = self.genre_agent.observe(
                     block,
@@ -96,7 +125,12 @@ class Bridge:
                     onset_density=self.features.onset_density,
                 )
                 self._update_signal_gate(self.features)
-                self.tracker.update(self.features, self.dt, genre=self.genre)
+                self.tracker.update(
+                    self.features,
+                    self.dt,
+                    genre=self.genre,
+                    policy=policy_for_hop,
+                )
                 if self.enabled and self.signal_live:
                     build_frame(
                         self.dmx,
@@ -200,7 +234,6 @@ class Bridge:
                         raise stream_err
                     break
 
-                # Unexpected capture EOF or error (e.g. USB interface reset / PipeWire restart).
                 self.dmx[:] = b"\x00" * len(self.dmx)
                 if self.sender is not None and self._was_sending:
                     self.sender.blackout()

@@ -34,6 +34,7 @@ class Monitor:
                 f"[{_fmt_time(t)}] {tracker.state.value.upper():<9}"
                 f" bpm {bpm}"
                 f" | div {rate:<3}"
+                f" | size {int(round(features.fx_size)):3d}"
                 f" | pace {_bar(features.pace_score, 8)}"
                 f" | build {_bar(features.build_score, 8)}"
                 f" | {features.archetype:<13}"

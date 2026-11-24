@@ -66,7 +66,7 @@ def build_bundle_tarball(dest_tar: Path, include_models: bool = True) -> None:
         parts = Path(ti.name).parts
         if any(p in skip_parts or p.endswith(".pyc") for p in parts):
             return None
-        if Path(ti.name).name in ("ui_layout.json", "companion.log"):
+        if Path(ti.name).name in ("ui_layout.json", "genre_profiles.json", "companion.log"):
             return None
         return ti
 
@@ -181,6 +181,13 @@ do
   fi
 done
 
+SAVED_PROFILES=""
+if [ -f "$DEST/genre_profiles.json" ]; then
+  SAVED_PROFILES="/tmp/magicq-venue-saved-profiles.json"
+  cp -f "$DEST/genre_profiles.json" "$SAVED_PROFILES"
+  echo "     Preserving learned genre profiles from: $DEST/genre_profiles.json"
+fi
+
 echo "  -> Stopping any previous companion instance on port 8765..."
 curl -fsS -m 2 -X POST http://127.0.0.1:8765/shutdown >/dev/null 2>&1 || true
 if command -v systemctl >/dev/null 2>&1; then
@@ -204,6 +211,10 @@ rm -f "$TAR"
 if [ -n "$SAVED_CFG" ] && [ -f "$SAVED_CFG" ]; then
   cp -f "$SAVED_CFG" "$DEST/config.toml"
   rm -f "$SAVED_CFG"
+fi
+if [ -n "$SAVED_PROFILES" ] && [ -f "$SAVED_PROFILES" ]; then
+  cp -f "$SAVED_PROFILES" "$DEST/genre_profiles.json"
+  rm -f "$SAVED_PROFILES"
 fi
 
 echo "  -> Ensuring system packages (python3-venv, libportaudio2)..."
@@ -347,7 +358,7 @@ def deploy_target(runner: SshRunner, target: str, tarball: Path, password: str) 
     if ws:
         print(
             f"     Telemetry   : section={ws.get('section')} bpm={ws.get('bpm')} "
-            f"pace={ws.get('pace')} divider={ws.get('bpm_rate')} "
+            f"pace={ws.get('pace')} divider={ws.get('bpm_rate')} fx_size={ws.get('fx_size')} "
             f"archetype={ws.get('archetype_label')} ({ws.get('rms_db')} dBFS)"
         )
     return status

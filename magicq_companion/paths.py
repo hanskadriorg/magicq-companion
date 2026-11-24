@@ -95,8 +95,9 @@ def data_dir(config_path: str | Path | None = None) -> Path:
 
 def default_layout_path(config_path: str | Path | None = None) -> Path:
     """Writable UI layout JSON, kept next to config.toml when possible."""
-    if config_path is not None:
-        return Path(config_path).resolve().parent / "ui_layout.json"
-    if is_frozen():
-        return default_config_path().parent / "ui_layout.json"
-    return install_dir() / "ui_layout.json"
+    return data_dir(config_path) / "ui_layout.json"
+
+
+def default_genre_profiles_path(config_path: str | Path | None = None) -> Path:
+    """Writable learned per-genre profiles JSON, kept next to config.toml."""
+    return data_dir(config_path) / "genre_profiles.json"

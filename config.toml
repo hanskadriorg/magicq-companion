@@ -47,6 +47,7 @@ input_channel = "left"
 [genre]
 # Offline ONNX music genre classifier + continuous archetype blending.
 enabled = true
+learning_enabled = true
 # "auto" = adapt dynamically to any genre played, or lock one archetype:
 # ambient_chill | groovy_warm | house_tech | melodic_prog | club_peak | hiphop_urban | fast_bass | rock_live
 mode = "auto"
@@ -71,7 +72,8 @@ drop_hit = 7
 four_four = 8
 # Chase speed vs BPM from intrinsic pace + genre: 255=full, 128=1/2, 64=1/4, 32=1/8.
 bpm_rate = 9
-drop_momentary = 10
+# Dynamic FX size master (0-255): genre baseline + fast bump on energy rises & drops.
+fx_size = 10
 
 # Safety floor/ceiling for DMX channel 9 (bpm_rate).
 # Within this band, the Genre Agent and Intrinsic Pace Score steer chase speed.
@@ -79,6 +81,11 @@ drop_momentary = 10
 min = "eighth"
 max = "full"
 decay_seconds = 3
+
+[fx_size]
+base = 100
+max = 235
+reactivity = 0.72
 
 [detection]
 kick_absent_below = 0.45

@@ -11,6 +11,6 @@
 | drop_hit | 9 | 7 | One-shot 255 impact trigger at drop start |
 | four_four | 11 | 8 | 255 while a 4/4 kick grid is locked |
 | bpm_rate | 14 | 9 | 32 / 64 / 128 / 255 chase divider driven by Genre Agent + intrinsic pace |
-| drop_momentary | 10 | 10 | Held at 0 in unattended venue autopilot |
+| fx_size | 10 | 10 | 0-255 dynamic FX Size Master (genre baseline + fast energy/drop bump) |
 
 Configs that still use legacy channel numbers (`drop_hit = 9`, `four_four = 11`, `bpm_rate = 14`) or retired `[app]`, `[fx]`, and `[matter]` sections are upgraded/ignored automatically on load.

@@ -1,10 +1,10 @@
-"""Control channel numbering: sequential 1..n and legacy address migration."""
+"""Control channel numbering: sequential 1..10 and legacy address migration."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Logical control channels (same names in sound and standalone FX modes).
+# Logical control channels mapped onto MagicQ PB1..PB10 (sequential 1..10).
 CONTROL_CHANNEL_NAMES: tuple[str, ...] = (
     "groove",
     "breakdown",
@@ -15,10 +15,10 @@ CONTROL_CHANNEL_NAMES: tuple[str, ...] = (
     "drop_hit",
     "four_four",
     "bpm_rate",
-    "drop_momentary",
+    "fx_size",
 )
 
-# Default DMX addresses before the 1..n renumber (gaps at 7, 8, 10, 12, 13).
+# Default DMX addresses before the 1..10 renumber (gaps at 7, 8, 10, 12, 13).
 LEGACY_DEFAULT_ADDRESSES: dict[str, int] = {
     "groove": 1,
     "breakdown": 2,
@@ -29,14 +29,13 @@ LEGACY_DEFAULT_ADDRESSES: dict[str, int] = {
     "drop_hit": 9,
     "four_four": 11,
     "bpm_rate": 14,
-    # Legacy slot 10 was held at 0; repurposed for momentary drop FX.
-    "drop_momentary": 10,
+    "fx_size": 10,
 }
 
 
 @dataclass(frozen=True)
 class ChannelRenumberMap:
-    """Maps legacy DMX addresses to the new sequential layout."""
+    """Maps legacy DMX addresses to the sequential 1..10 layout."""
 
     old_to_new: dict[int, int]
     new_to_old: dict[int, int]
@@ -48,10 +47,10 @@ class ChannelRenumberMap:
 
     def document_lines(self) -> list[str]:
         lines = [
-            "# Control channel renumber (legacy DMX address → new 1..n)",
+            "# Control channel map (legacy DMX address -> sequential 1..10)",
             "",
-            "| Name | Legacy | New |",
-            "|------|--------|-----|",
+            "| Name | Legacy | Current |",
+            "|------|--------|---------|",
         ]
         for i, name in enumerate(CONTROL_CHANNEL_NAMES, start=1):
             legacy = LEGACY_DEFAULT_ADDRESSES[name]
@@ -60,12 +59,6 @@ class ChannelRenumberMap:
         lines.append(
             "Configs that still use legacy numbers are upgraded on load; "
             "unknown addresses are left unchanged."
-        )
-        lines.append("")
-        lines.append(
-            "Legacy channels 7, 8, and 10 were previously forced to 0 in autopilot "
-            "output; 12 and 13 were unused. **MagicQ must be repatched for channels "
-            "7–10** (drop_hit, four_four, bpm_rate, drop_momentary)."
         )
         return lines
 
@@ -97,7 +90,7 @@ def sequential_addresses() -> dict[str, int]:
 
 
 def migrate_channel_map_values(values: dict[str, int]) -> dict[str, int]:
-    """If values match legacy defaults or explicit legacy slots, renumber to 1..n."""
+    """If values match legacy defaults or explicit legacy slots, renumber to 1..10."""
     renum = DEFAULT_RENUMBER
     out: dict[str, int] = {}
     for name in CONTROL_CHANNEL_NAMES:
@@ -107,7 +100,6 @@ def migrate_channel_map_values(values: dict[str, int]) -> dict[str, int]:
         elif raw == renum.name_to_new[name]:
             out[name] = raw
         else:
-            # User-custom mapping: migrate only when it equals the legacy default.
             if raw == LEGACY_DEFAULT_ADDRESSES.get(name, raw):
                 out[name] = renum.name_to_new[name]
             else:

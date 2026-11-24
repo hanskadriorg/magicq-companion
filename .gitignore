@@ -9,4 +9,5 @@ dist/
 data/
 models/*.onnx
 ui_layout.json
+genre_profiles.json
 companion.log

@@ -1046,6 +1046,22 @@ class GenreAgent:
             return "manual"
         return "onnx" if self._onnx is not None else "dsp"
 
+    @property
+    def has_live_estimate(self) -> bool:
+        with self._state_lock:
+            return bool(self._has_estimate)
+
+    def current_probabilities(self) -> dict[str, float]:
+        """Return the active archetype probability distribution (sums to 1.0)."""
+        with self._state_lock:
+            mode = coerce_genre_mode(self.cfg.mode)
+            if mode != "auto":
+                return {name: (1.0 if name == mode else 0.0) for name in ARCHETYPE_NAMES}
+            total = sum(max(0.0, float(v)) for v in self._probs.values())
+            if total <= _EPS:
+                return {name: (1.0 if name == "house_tech" else 0.0) for name in ARCHETYPE_NAMES}
+            return {name: max(0.0, float(self._probs.get(name, 0.0))) / total for name in ARCHETYPE_NAMES}
+
     def control_vector(self) -> GenreControlVector:
         with self._state_lock:
             mode = coerce_genre_mode(self.cfg.mode)

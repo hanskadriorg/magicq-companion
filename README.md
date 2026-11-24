@@ -36,7 +36,7 @@ Designed for dedicated venue computers (such as **T14** and **T15**) running Mag
 | 7 | `drop_hit` | One-shot `255` flash at drop start |
 | 8 | `four_four` | `255` while a steady 4/4 kick grid is locked |
 | 9 | `bpm_rate` | `32` / `64` / `128` / `255` (`1/8` / `1/4` / `1/2` / `1/1`) from Genre Agent + Intrinsic Pace |
-| 10 | `drop_momentary` | Held at `0` in unattended autopilot |
+| 10 | `fx_size` | `0`–`255` dynamic FX Size Master: genre base + fast bump on energy rises & drops |
 
 Existing `config.toml` files from `magicq-companion` (including legacy channel addresses or `[app]`, `[fx]`, and `[matter]` sections) load cleanly without modification.
 

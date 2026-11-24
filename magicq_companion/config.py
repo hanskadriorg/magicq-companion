@@ -73,8 +73,8 @@ class ChannelMap:
     four_four: int = 8
     # Chase rate vs BPM: 255=full, 128=half, 64=quarter, 32=eighth (pace-picked).
     bpm_rate: int = 9
-    # Reserved control channel 10 (held at 0 in unattended autopilot).
-    drop_momentary: int = 10
+    # Dynamic FX size master (0-255): genre baseline + fast bump on energy rises & drops.
+    fx_size: int = 10
 
 
 ARCHETYPE_NAMES = (
@@ -123,11 +123,13 @@ def coerce_genre_mode(value: object) -> str:
 
 @dataclass
 class GenreConfig:
-    """Offline ONNX music genre agent settings."""
+    """Offline ONNX music genre agent & profile learning settings."""
 
     enabled: bool = True
     # "auto" = live ONNX + DSP blending; or lock one of ARCHETYPE_NAMES.
     mode: str = "auto"
+    # Learn per-genre profiles when operator adjusts macro settings in UI.
+    learning_enabled: bool = True
     # Seconds between background genre classifications.
     interval_seconds: float = 3.0
     # EMA smoothing window (seconds) across archetype probabilities.
@@ -407,6 +409,15 @@ class BpmRateConfig:
 
 
 @dataclass
+class FxSizeConfig:
+    """Fallback / base parameters for DMX channel 10 (fx_size, 0-255)."""
+
+    base: int = 100
+    max: int = 235
+    reactivity: float = 0.72
+
+
+@dataclass
 class Config:
     network: NetworkConfig = field(default_factory=NetworkConfig)
     artnet: ArtNetConfig = field(default_factory=ArtNetConfig)
@@ -416,6 +427,7 @@ class Config:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     build_score: BuildScoreConfig = field(default_factory=BuildScoreConfig)
     bpm_rate: BpmRateConfig = field(default_factory=BpmRateConfig)
+    fx_size: FxSizeConfig = field(default_factory=FxSizeConfig)
     ui: UiConfig = field(default_factory=UiConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
 
@@ -429,6 +441,7 @@ _SECTIONS = {
     "detection": DetectionConfig,
     "build_score": BuildScoreConfig,
     "bpm_rate": BpmRateConfig,
+    "fx_size": FxSizeConfig,
     "ui": UiConfig,
     "server": ServerConfig,
 }
@@ -444,6 +457,7 @@ _RETIRED_KEYS = {
     ("channels", "energy"),
     ("channels", "kick"),
     ("channels", "melody"),
+    ("channels", "drop_momentary"),
     ("build_score", "weight_brightness"),
     ("build_score", "full_scale_brightness_slope"),
 }
@@ -481,7 +495,20 @@ def load_config(path: str | Path | None) -> Config:
     cfg.audio.input_channel = coerce_input_channel(cfg.audio.input_channel)
     cfg.audio.noise_floor_db = clamp_noise_floor(cfg.audio.noise_floor_db)
     cfg.genre.enabled = bool(cfg.genre.enabled)
+    cfg.genre.learning_enabled = bool(cfg.genre.learning_enabled)
     cfg.genre.mode = coerce_genre_mode(cfg.genre.mode)
+    try:
+        cfg.fx_size.base = max(0, min(255, int(round(float(cfg.fx_size.base)))))
+    except (TypeError, ValueError):
+        cfg.fx_size.base = 100
+    try:
+        cfg.fx_size.max = max(cfg.fx_size.base, min(255, int(round(float(cfg.fx_size.max)))))
+    except (TypeError, ValueError):
+        cfg.fx_size.max = max(cfg.fx_size.base, 235)
+    try:
+        cfg.fx_size.reactivity = max(0.0, min(1.0, float(cfg.fx_size.reactivity)))
+    except (TypeError, ValueError):
+        cfg.fx_size.reactivity = 0.72
     try:
         cfg.genre.interval_seconds = max(1.0, min(15.0, float(cfg.genre.interval_seconds)))
     except (TypeError, ValueError):

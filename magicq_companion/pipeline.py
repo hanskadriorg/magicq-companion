@@ -72,6 +72,8 @@ class Bridge:
         self.policy: GenrePolicy = self.profile_store.resolve(
             self.genre_agent.current_probabilities()
         )
+        self.tracker._genre = self.genre
+        self.tracker._policy = self.policy
         self.dmx = bytearray(512)
 
         self.t = 0.0

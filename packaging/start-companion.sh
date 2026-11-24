@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start MagicQ Companion after boot (used by @reboot cron).
+# Start MagicQ Venue Companion after boot (used by systemd or @reboot cron).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,7 +8,7 @@ LOCK="/tmp/magicq-companion.lock"
 export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
 export PYTHONUNBUFFERED=1
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-export PATH="$ROOT/.node/bin:$ROOT/.venv/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+export PATH="$ROOT/.venv/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 for _ in $(seq 1 45); do
   if [ -S "${XDG_RUNTIME_DIR}/pipewire-0" ] || [ -d /dev/snd ]; then

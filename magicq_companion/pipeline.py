@@ -1,7 +1,8 @@
-"""The analysis pipeline loop, shared by the console mode and the web UI."""
+"""The analysis pipeline loop and unattended audio-reconnect supervisor."""
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -11,24 +12,27 @@ import numpy as np
 from .config import Config
 from .dmx import build_frame
 from .features import FeatureExtractor, Features
+from .genre_agent import GenreAgent, GenreControlVector
 from .output import DmxSender
 from .state_machine import SectionTracker
 
 
 class Bridge:
-    """Consumes audio blocks, runs analysis, and emits DMX frames.
+    """Consumes audio blocks, runs genre + DSP analysis, and emits DMX frames.
 
     After each processed block the current state is available on the
-    instance: `t`, `features`, `tracker`, and `dmx`.
+    instance: `t`, `features`, `tracker`, `genre`, and `dmx`.
     """
 
     def __init__(
         self,
         cfg: Config,
-        blocks: Iterator[np.ndarray],
+        blocks: Iterator[np.ndarray] | None = None,
         sender: DmxSender | None = None,
         pace: bool = False,
         duration: float | None = None,
+        *,
+        async_genre: bool = True,
     ) -> None:
         self.cfg = cfg
         self.blocks = blocks
@@ -48,72 +52,190 @@ class Bridge:
             noise_floor_db=cfg.audio.noise_floor_db,
         )
         self.tracker = SectionTracker(cfg.detection, self.extractor.fps)
+        self.genre_agent = GenreAgent(
+            cfg.genre,
+            sr,
+            async_worker=async_genre,
+        )
+        self.genre: GenreControlVector = self.genre_agent.control_vector()
         self.dmx = bytearray(512)
 
         self.t = 0.0
         self.features = Features()
-        # Output gate: Art-Net blackout while analysis can stay live.
         self.enabled = True
-        # Analyzer gate: skip feature/section work; UI server stays up.
         self.analyzing = True
-        # Music gate: False after a long stretch of hiss/silence.
         self.signal_live = True
         self.quiet_s = 0.0
         self._music_s = 0.0
         self._was_sending = True
+        self._frame_idx = 0
+
+    def _consume_stream(
+        self,
+        blocks: Iterator[np.ndarray],
+        on_frame: Callable[[Bridge], None] | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> None:
+        send_every = max(1, round(self.extractor.fps / self.cfg.artnet.fps))
+        wall_start = time.monotonic() - self.t
+        for block in blocks:
+            self._frame_idx += 1
+            self.t += self.dt
+            if self.analyzing:
+                genre_vec = self.genre_agent.control_vector()
+                self.features = self.extractor.process(
+                    block,
+                    genre=genre_vec,
+                    section=self.tracker.state.value,
+                )
+                self.genre = self.genre_agent.observe(
+                    block,
+                    above_floor=self.features.above_floor,
+                    bpm=self.features.bpm,
+                    kick_regularity=self.features.kick_regularity,
+                    onset_density=self.features.onset_density,
+                )
+                self._update_signal_gate(self.features)
+                self.tracker.update(self.features, self.dt, genre=self.genre)
+                if self.enabled and self.signal_live:
+                    build_frame(
+                        self.dmx,
+                        self.cfg.channels,
+                        self.features,
+                        self.tracker,
+                        self.cfg.detection,
+                    )
+                else:
+                    self.dmx[:] = b"\x00" * len(self.dmx)
+            else:
+                self.dmx[:] = b"\x00" * len(self.dmx)
+
+            sending = self.analyzing and self.enabled and self.signal_live
+            if self.sender is not None and self._frame_idx % send_every == 0:
+                if sending:
+                    self.sender.send(self.dmx)
+                elif self._was_sending:
+                    self.sender.blackout()
+                self._was_sending = sending
+
+            if on_frame is not None:
+                on_frame(self)
+
+            if self.pace:
+                lag = self.t - (time.monotonic() - wall_start)
+                if lag > 0:
+                    time.sleep(lag)
+
+            if stop_event is not None and stop_event.is_set():
+                break
+            if self.duration is not None and self.t >= self.duration:
+                break
 
     def run(
         self,
         on_frame: Callable[[Bridge], None] | None = None,
         stop_event: threading.Event | None = None,
     ) -> None:
-        send_every = max(1, round(self.extractor.fps / self.cfg.artnet.fps))
-        wall_start = time.monotonic()
         try:
-            for i, block in enumerate(self.blocks):
-                self.t += self.dt
-                # Always consume audio so capture doesn't back up / block.
-                if self.analyzing:
-                    self.features = self.extractor.process(block)
-                    self._update_signal_gate(self.features)
-                    self.tracker.update(self.features, self.dt)
-                    if self.enabled and self.signal_live:
-                        build_frame(
-                            self.dmx,
-                            self.cfg.channels,
-                            self.features,
-                            self.tracker,
-                            self.cfg.detection,
-                        )
-                    else:
-                        self.dmx[:] = b"\x00" * len(self.dmx)
-                else:
-                    self.dmx[:] = b"\x00" * len(self.dmx)
+            if self.blocks is not None:
+                self._consume_stream(self.blocks, on_frame=on_frame, stop_event=stop_event)
+        finally:
+            self.close()
 
-                sending = self.analyzing and self.enabled and self.signal_live
-                if self.sender is not None and i % send_every == 0:
-                    if sending:
-                        self.sender.send(self.dmx)
-                    elif self._was_sending:
-                        self.sender.blackout()
-                    self._was_sending = sending
+    def run_supervised(
+        self,
+        source_factory: Callable[[Config], tuple[Iterator[np.ndarray], str]],
+        *,
+        initial: tuple[Iterator[np.ndarray], str] | None = None,
+        reconnect: bool = True,
+        on_frame: Callable[[Bridge], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> None:
+        """Run analysis continuously, auto-reopening audio capture on device/PipeWire drops."""
+        wait_s = max(0.5, float(getattr(self.cfg.server, "audio_reconnect_seconds", 3.0)))
+        current = initial
+        try:
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                if self.duration is not None and self.t >= self.duration:
+                    break
 
-                if on_frame is not None:
-                    on_frame(self)
+                if current is None:
+                    try:
+                        current = source_factory(self.cfg)
+                    except Exception as exc:
+                        msg = f"audio unavailable ({exc}) — retrying in {wait_s:g}s"
+                        if on_status is not None:
+                            on_status(msg)
+                        else:
+                            print(f"[watchdog] {msg}", file=sys.stderr)
+                        if not reconnect:
+                            raise
+                        if self._wait_stop(stop_event, wait_s):
+                            break
+                        continue
 
-                if self.pace:
-                    lag = self.t - (time.monotonic() - wall_start)
-                    if lag > 0:
-                        time.sleep(lag)
+                blocks, desc = current
+                current = None
+                self.blocks = blocks
+                if on_status is not None:
+                    on_status(desc)
+
+                stream_err: Exception | None = None
+                try:
+                    self._consume_stream(blocks, on_frame=on_frame, stop_event=stop_event)
+                except Exception as exc:
+                    stream_err = exc
+                finally:
+                    _close_blocks(blocks)
 
                 if stop_event is not None and stop_event.is_set():
                     break
                 if self.duration is not None and self.t >= self.duration:
                     break
+                if not reconnect:
+                    if stream_err is not None:
+                        raise stream_err
+                    break
+
+                # Unexpected capture EOF or error (e.g. USB interface reset / PipeWire restart).
+                self.dmx[:] = b"\x00" * len(self.dmx)
+                if self.sender is not None and self._was_sending:
+                    self.sender.blackout()
+                    self._was_sending = False
+                reason = f": {stream_err}" if stream_err is not None else ""
+                msg = f"audio stream interrupted{reason} — reconnecting in {wait_s:g}s"
+                if on_status is not None:
+                    on_status(msg)
+                else:
+                    print(f"[watchdog] {msg}", file=sys.stderr)
+                if self._wait_stop(stop_event, wait_s):
+                    break
         finally:
-            if self.sender is not None:
+            self.close()
+
+    @staticmethod
+    def _wait_stop(stop_event: threading.Event | None, seconds: float) -> bool:
+        if stop_event is not None:
+            return stop_event.wait(timeout=seconds)
+        time.sleep(seconds)
+        return False
+
+    def close(self) -> None:
+        if self.blocks is not None:
+            _close_blocks(self.blocks)
+        self.genre_agent.close()
+        if self.sender is not None:
+            try:
                 self.sender.blackout()
+            except Exception:
+                pass
+            try:
                 self.sender.close()
+            except Exception:
+                pass
 
     def _update_signal_gate(self, features: Features) -> None:
         det = self.cfg.detection
@@ -142,3 +264,12 @@ class Bridge:
         elif self._music_s >= 1.5:
             self.signal_live = True
             self.quiet_s = 0.0
+
+
+def _close_blocks(blocks: Iterator[np.ndarray]) -> None:
+    close = getattr(blocks, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass

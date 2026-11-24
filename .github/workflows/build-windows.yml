@@ -24,6 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      - name: Fetch offline ONNX genre model
+        run: |
+          python scripts/fetch_models.py --dest models
+
       - name: PyInstaller
         run: |
           pyinstaller --noconfirm --clean packaging/magicq_companion.spec

@@ -2,11 +2,19 @@
 # PyInstaller spec — build on Windows:
 #   pyinstaller packaging/magicq_companion.spec
 
-import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH).parent.resolve()
 PKG = ROOT / "magicq_companion"
+MODELS = ROOT / "models"
+
+datas = [
+    (str(PKG / "static"), "static"),
+    (str(PKG / "base_show"), "base_show"),
+    (str(ROOT / "config.toml"), "."),
+]
+if MODELS.is_dir():
+    datas.append((str(MODELS), "models"))
 
 block_cipher = None
 
@@ -14,32 +22,31 @@ a = Analysis(
     [str(ROOT / "packaging" / "entry.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[
-        (str(PKG / "static"), "static"),
-        (str(PKG / "base_show"), "base_show"),
-        (str(ROOT / "config.toml"), "."),
-    ],
+    datas=datas,
     hiddenimports=[
         "magicq_companion",
         "magicq_companion.__main__",
         "magicq_companion.audio",
         "magicq_companion.artnet",
         "magicq_companion.config",
+        "magicq_companion.control_channels",
         "magicq_companion.dmx",
         "magicq_companion.features",
+        "magicq_companion.genre_agent",
         "magicq_companion.monitor",
         "magicq_companion.paths",
         "magicq_companion.pipeline",
+        "magicq_companion.schedule",
         "magicq_companion.simulate",
         "magicq_companion.state_machine",
         "magicq_companion.ui",
         "magicq_companion.netif",
         "magicq_companion.output",
         "magicq_companion.sacn",
-        "magicq_companion.matter_runtime",
         "numpy",
         "sounddevice",
         "aiohttp",
+        "onnxruntime",
         "cffi",
     ],
     hookspath=[],
@@ -70,7 +77,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,  # keep console for logs / --list-devices
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

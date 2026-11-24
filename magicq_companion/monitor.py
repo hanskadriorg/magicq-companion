@@ -1,4 +1,4 @@
-"""Console status display: section transitions and a live status line."""
+"""Console status display: section transitions, genre, pace, and live meters."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from .features import Features
 from .state_machine import Section, SectionTracker
 
 _STATUS_INTERVAL = 0.1
+_RATE_LABELS = {32: "1/8", 64: "1/4", 128: "1/2", 255: "1/1"}
 
 
 class Monitor:
@@ -21,20 +22,21 @@ class Monitor:
                 came_from = self._last_section.value.upper()
                 sys.stdout.write(
                     f"\r\033[K[{_fmt_time(t)}] {came_from} -> "
-                    f"{tracker.state.value.upper()}\n"
+                    f"{tracker.state.value.upper()} ({features.archetype_label})\n"
                 )
             self._last_section = tracker.state
 
         if t - self._last_status_t >= _STATUS_INTERVAL:
             self._last_status_t = t
             bpm = f"{features.bpm:5.1f}" if features.bpm else "  ---"
+            rate = _RATE_LABELS.get(int(round(features.bpm_rate)), str(int(features.bpm_rate)))
             line = (
                 f"[{_fmt_time(t)}] {tracker.state.value.upper():<9}"
                 f" bpm {bpm}"
-                f" | energy {_bar(features.energy_norm / 2)}"
-                f" | bass {_bar(features.bass_norm / 2)}"
-                f" | build {_bar(features.build_score)}"
-                f" | ramp {int(tracker.build_progress * 255):3d}"
+                f" | div {rate:<3}"
+                f" | pace {_bar(features.pace_score, 8)}"
+                f" | build {_bar(features.build_score, 8)}"
+                f" | {features.archetype:<13}"
             )
             sys.stdout.write(f"\r\033[K{line}")
             sys.stdout.flush()

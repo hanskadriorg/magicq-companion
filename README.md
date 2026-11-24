@@ -42,6 +42,18 @@ Existing `config.toml` files from `magicq-companion` (including legacy channel a
 
 ## Setup on T14 & T15 (Linux)
 
+### Automated LAN deploy from a laptop on the venue network
+
+```bash
+git fetch origin cursor/venue-genre-agent-d386
+git checkout cursor/venue-genre-agent-d386
+python3 scripts/deploy_venue_lan.py neli-t14@192.168.1.110 neli-t15@192.168.1.200
+```
+
+This pre-fetches the offline Discogs-EffNet ONNX model locally once, preserves each machine's existing `config.toml` (audio device, noise floor, and MagicQ network/universe), stops any previous `magicq-companion` instance cleanly, installs `.venv` + `onnxruntime`, enables `magicq-venue.service` (`Restart=always`), and verifies live HTTP + WebSocket telemetry on both `http://192.168.1.110:8765` and `http://192.168.1.200:8765`.
+
+### Direct install on a single venue PC
+
 Requires Python 3.11+ and PortAudio / PipeWire (`sudo apt install libportaudio2`). No Node.js required.
 
 ```bash

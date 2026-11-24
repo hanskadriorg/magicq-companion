@@ -23,6 +23,7 @@ from magicq_companion.genre_agent import blend_control_vector
 from magicq_companion.pipeline import Bridge
 from magicq_companion.state_machine import Section, SectionTracker
 from magicq_companion.ui import _Manager, _run_stdlib_server
+from scripts.deploy_venue_lan import build_bundle_tarball, probe_remote_dashboard
 
 
 def _free_port() -> int:
@@ -258,11 +259,30 @@ intensity = 0.42
                 self.assertIn("archetype", frame_json)
                 self.assertIn("pace", frame_json)
                 self.assertIn("dmx", frame_json)
+
+            probed = probe_remote_dashboard("127.0.0.1", port=port, timeout=3.0)
+            self.assertEqual(probed["config"]["meta"]["genre_mode"], "groovy_warm")
+            self.assertIn("pace", probed["ws"])
         finally:
             manager.stop_all()
             if srv_task:
                 loop.call_soon_threadsafe(srv_task[0].cancel)
             server_thread.join(timeout=2.0)
+
+    def test_deploy_bundle_tarball_contains_required_files_without_runtime_junk(self) -> None:
+        import tarfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = Path(tmp) / "bundle.tar.gz"
+            build_bundle_tarball(tar_path, include_models=False)
+            self.assertTrue(tar_path.is_file())
+            with tarfile.open(tar_path, "r:gz") as tf:
+                names = set(tf.getnames())
+            self.assertIn("magicq_companion/genre_agent.py", names)
+            self.assertIn("magicq_companion/static/index.html", names)
+            self.assertIn("packaging/install-venue.sh", names)
+            self.assertIn("config.toml", names)
+            self.assertFalse(any("__pycache__" in n or n.endswith(".pyc") for n in names))
 
 
 if __name__ == "__main__":
